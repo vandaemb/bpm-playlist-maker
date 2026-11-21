@@ -148,16 +148,21 @@ async function fetchLastfm(path, params, pages) {
   return settled.filter((r) => r.status === "fulfilled").flatMap((r) => r.value.tracks || []);
 }
 
-async function fetchTempos(ids) {
-  for (let attempt = 0; attempt < 2; attempt++) {
+// Tempo opvragen met geduld: bij "limiet bereikt" (429) of een tijdelijke fout wachten we steeds langer.
+const TEMPO_WAITS = [3, 8, 20, 45]; // seconden tussen de pogingen
+async function fetchTempos(ids, onWait) {
+  for (let attempt = 0; ; attempt++) {
     try {
       return (await api("/api/tempo", { ids: ids.join(",") })).tempos || {};
     } catch (err) {
-      if (attempt === 0) await sleep(1500);
-      else throw err;
+      if (attempt >= TEMPO_WAITS.length) throw err;
+      const secs = TEMPO_WAITS[attempt];
+      for (let left = secs; left > 0; left--) {
+        onWait?.(left, /429|limiet/.test(err.message));
+        await sleep(1000);
+      }
     }
   }
-  return {};
 }
 
 async function onSearch(ev) {
@@ -185,7 +190,7 @@ async function onSearch(ev) {
     const genreTracks = await fetchLastfm("/api/lastfm-tag", { tag: genre }, 10);
     if (!genreTracks.length) throw new Error("Last.fm gaf geen nummers terug voor dit genre. Controleer de spelling of probeer een ander genre.");
     const candidates = L.buildPool({ genreTracks });
-    state.scan = { id, candidates, index: 0, bpm, tol, yearFrom, yearTo, found: [], keys: new Set(), running: false, failedBatches: 0, searchErrors: 0, outOfYears: 0 };
+    state.scan = { id, candidates, index: 0, bpm, tol, yearFrom, yearTo, found: [], keys: new Set(), running: false, paused: "", failedBatches: 0, searchErrors: 0, outOfYears: 0 };
     await continueScan(FIRST_GOAL);
   } catch (err) {
     setStatus(`Zoeken mislukt: ${err.message}`, "error");
@@ -198,11 +203,15 @@ async function continueScan(extra) {
   const scan = state.scan;
   if (!scan || scan.running) return;
   scan.running = true;
+  scan.paused = "";
+  scan.stopped = false;
   $("search-btn").disabled = true;
   $("more-btn").disabled = true;
+  $("stop-btn").hidden = false;
+  $("results-head").hidden = false;
   const goal = scan.found.length + extra;
   try {
-    while (scan.found.length < goal && scan.index < scan.candidates.length && scan.id === state.scanId) {
+    while (!scan.stopped && scan.found.length < goal && scan.index < scan.candidates.length && scan.id === state.scanId) {
       const batch = scan.candidates.slice(scan.index, scan.index + BATCH);
       scan.index += batch.length;
       setStatus(`Zoeken… ${scan.index} van ${scan.candidates.length} nummers gecontroleerd · ${scan.found.length} gevonden`);
@@ -227,10 +236,16 @@ async function continueScan(extra) {
 
       let tempos = {};
       try {
-        tempos = await fetchTempos([...new Set(inYears.map((m) => m.spotifyId))]);
-      } catch {
-        scan.failedBatches++;
-        continue;
+        tempos = await fetchTempos([...new Set(inYears.map((m) => m.spotifyId))], (left, limited) => {
+          if (scan.id === state.scanId) {
+            setStatus(`${limited ? "De tempo-dienst (ReccoBeats) zegt: te veel aanvragen." : "De tempo-dienst reageert niet."} Nieuwe poging over ${left} s… · ${scan.found.length} gevonden`);
+          }
+        });
+      } catch (err) {
+        // Niet doorgaan en deze groep overslaan: zet de zoekopdracht stil zodat "Meer zoeken" hem later hervat.
+        scan.index -= batch.length;
+        scan.paused = err.message;
+        break;
       }
       if (scan.id !== state.scanId) return;
       for (const m of inYears) {
@@ -263,6 +278,7 @@ async function continueScan(extra) {
     return;
   } finally {
     scan.running = false;
+    $("stop-btn").hidden = true;
     if (scan.id === state.scanId) {
       $("search-btn").disabled = false;
       $("more-btn").disabled = false;
@@ -272,6 +288,10 @@ async function continueScan(extra) {
   if (scan.id !== state.scanId) return;
 
   const exhausted = scan.index >= scan.candidates.length;
+  if (scan.paused) {
+    return setStatus(`Gepauzeerd: de tempo-dienst (ReccoBeats) blijft fouten geven (${scan.paused}). ${scan.found.length} nummers gevonden tot nu toe. Wacht een paar minuten en klik op "Meer zoeken" om verder te gaan (reeds gecontroleerde nummers worden onthouden).`, "error");
+  }
+  if (scan.stopped) return setStatus(`Gestopt · ${scan.found.length} nummers gevonden · ${scan.index} van ${scan.candidates.length} gecontroleerd. Klik op "Meer zoeken" om verder te gaan.`);
   const parts = [`${scan.found.length} nummers gevonden`];
   parts.push(exhausted ? "alle kandidaten zijn gecontroleerd" : `${scan.index} van ${scan.candidates.length} gecontroleerd, klik op "Meer zoeken" voor meer`);
   if (!scan.found.length && exhausted) parts.push("probeer een grotere marge, een breder jaarbereik of een ander genre");
@@ -506,6 +526,9 @@ function init() {
   $("export-btn").addEventListener("click", onExport);
   $("csv-btn").addEventListener("click", downloadCsv);
   $("more-btn").addEventListener("click", () => continueScan(MORE_GOAL));
+  $("stop-btn").addEventListener("click", () => {
+    if (state.scan?.running) state.scan.stopped = true;
+  });
   $("connect-btn").addEventListener("click", connectToSpotify);
   $("disconnect-btn").addEventListener("click", disconnectSpotify);
   $("pl-name").addEventListener("input", (e) => {
