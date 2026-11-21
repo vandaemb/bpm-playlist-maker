@@ -31,39 +31,24 @@ await test("normKey negeert accenten, (remaster), feat. en hoofdletters", () => 
   assert.equal(L.normKey("Song feat. X", "A & B"), L.normKey("Song", "A and B"));
 });
 
-await test("buildPool: zonder genre = landtop; wereldwijd alleen met 'abroad'", () => {
-  const countryTracks = [{ name: "A", artist: "X" }, { name: "B", artist: "Y" }];
-  const globalTracks = [{ name: "B", artist: "Y" }, { name: "G", artist: "Z" }];
-  const local = L.buildLocalSet(countryTracks);
-  const off = L.buildPool({ local, countryTracks, globalTracks, genre: "", abroad: false });
-  assert.deepEqual(off.map((c) => c.title), ["A", "B"]);
-  const on = L.buildPool({ local, countryTracks, globalTracks, genre: "", abroad: true });
-  assert.deepEqual(on.map((c) => c.title), ["A", "B", "G"]);
-  assert.equal(on[2].locScore, 0);
+await test("buildPool: ontdubbelt, behoudt volgorde en negeert rommel", () => {
+  const t = [{ name: "A", artist: "X" }, { name: "a (live)", artist: "x" }, null, { name: "", artist: "Q" }, { name: "B", artist: "Y" }];
+  assert.deepEqual(L.buildPool({ genreTracks: t }).map((c) => c.title), ["A", "B"]);
+  assert.deepEqual(L.buildPool({}), []);
 });
 
-await test("buildPool: met genre blijven alleen lokaal populaire over, tenzij 'abroad'; lokaal eerst", () => {
-  const countryTracks = [{ name: "Local Hit", artist: "Pop Ster" }];
-  const genreTracks = [
-    { name: "Foreign", artist: "Intl" },
-    { name: "Other Song", artist: "Pop Ster" }, // andere track, wel populaire artiest => score 1
-    { name: "Local Hit", artist: "Pop Ster" }, // zelfde track => score 2
-  ];
-  const local = L.buildLocalSet(countryTracks);
-  const off = L.buildPool({ local, countryTracks, genreTracks, genre: "pop", abroad: false });
-  assert.deepEqual(off.map((c) => [c.title, c.locScore]), [["Local Hit", 2], ["Other Song", 1]]);
-  const on = L.buildPool({ local, countryTracks, genreTracks, genre: "pop", abroad: true });
-  assert.deepEqual(on.map((c) => c.title), ["Local Hit", "Other Song", "Foreign"]);
-});
-
-await test("buildPool: ontdubbelt en negeert rommel", () => {
-  const t = [{ name: "A", artist: "X" }, { name: "a (live)", artist: "x" }, null, { name: "", artist: "Q" }];
-  assert.equal(L.buildPool({ local: null, countryTracks: t, genre: "", abroad: false }).length, 1);
-});
-
-await test("makeCountry: Last.fm-naam en overrides", () => {
-  assert.equal(L.makeCountry("BE", "Belgium").en, "Belgium");
-  assert.equal(L.makeCountry("CZ", "Czechia").en, "Czech Republic");
+await test("releaseYear en yearMatches", () => {
+  assert.equal(L.releaseYear("1999"), 1999);
+  assert.equal(L.releaseYear("1999-05"), 1999);
+  assert.equal(L.releaseYear("1999-05-21"), 1999);
+  assert.equal(L.releaseYear("onbekend"), null);
+  assert.equal(L.releaseYear(undefined), null);
+  assert.equal(L.yearMatches(1985, 1980, 1989), true);
+  assert.equal(L.yearMatches(1980, 1980, 1989), true);
+  assert.equal(L.yearMatches(1989, 1980, 1989), true);
+  assert.equal(L.yearMatches(1990, 1980, 1989), false);
+  assert.equal(L.yearMatches(1985, 1989, 1980), true);
+  assert.equal(L.yearMatches(null, 1950, 2026), false);
 });
 
 await test("pickBestMatch kiest het juiste nummer en weigert verkeerde artiest", () => {
@@ -82,10 +67,10 @@ await test("buildSearchQuery en mapSpotifyTracks", () => {
   assert.equal(L.buildSearchQuery({ q: "  hello   world " }), "hello world");
   assert.equal(L.buildSearchQuery({ q: "x".repeat(300) }).length, 100);
   const mapped = L.mapSpotifyTracks({ tracks: { items: [
-    { uri: uri("a"), name: "N", artists: [{ name: "R" }], album: { name: "Al", images: [{ url: "u1" }, { url: "u2" }] }, duration_ms: 5 },
+    { uri: uri("a"), name: "N", artists: [{ name: "R" }], album: { name: "Al", release_date: "1987-03-02", images: [{ url: "u1" }, { url: "u2" }] }, duration_ms: 5 },
     { uri: "spotify:track:bad", name: "X" }, null,
   ] } });
-  assert.deepEqual(mapped, [{ uri: uri("a"), name: "N", artists: ["R"], album: "Al", image: "u2", durationMs: 5 }]);
+  assert.deepEqual(mapped, [{ uri: uri("a"), name: "N", artists: ["R"], album: "Al", image: "u2", durationMs: 5, year: 1987 }]);
   assert.deepEqual(L.mapSpotifyTracks(null), []);
 });
 

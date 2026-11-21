@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BPM Playlist Maker</title>
-  <meta name="description" content="Maak een Spotify-playlist op basis van BPM, genre en jouw land.">
+  <meta name="description" content="Maak een Spotify-playlist op basis van BPM, genre en uitgavejaar.">
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
   <script type="module" src="js/app.js"></script>
@@ -12,7 +12,7 @@
 <body>
   <header class="top">
     <h1>BPM Playlist Maker</h1>
-    <p>Kies een tempo, een genre en jouw land. Stel de playlist samen en exporteer ze met één klik naar Spotify.</p>
+    <p>Kies een tempo, een genre en de periode waarin de nummers uitkwamen. Stel de playlist samen en exporteer ze met één klik naar Spotify.</p>
   </header>
 
   <main>
@@ -21,7 +21,7 @@
         <summary id="h-help">Hoe zet ik mijn playlist in Spotify?</summary>
         <ol>
           <li><strong>Verbind met Spotify.</strong> Klik op <em>Verbind met Spotify</em>, log in bij Spotify en klik op <em>Akkoord</em>. Je wachtwoord blijft bij Spotify en deze site bewaart niets op een server. Dit hoeft eenmalig per bezoek.</li>
-          <li><strong>Zoek nummers.</strong> Vul je BPM, eventueel een genre en je land in en klik op <em>Zoek nummers</em>. Dit kan even duren, de eerste resultaten verschijnen snel.</li>
+          <li><strong>Zoek nummers.</strong> Vul je BPM, een genre in en kies met de twee schuiven vanaf en tot welk jaar de nummers uitgebracht mogen zijn, en klik op <em>Zoek nummers</em>. Dit kan even duren, de eerste resultaten verschijnen snel.</li>
           <li><strong>Bouw je lijst.</strong> Klik op <em>Toevoegen</em> bij de nummers die je wilt (of <em>Voeg de eerste 25 toe</em>). Pas daarna de volgorde aan door te slepen of te sorteren, en voeg zelf nummers toe via <em>Zoek op Spotify</em>.</li>
           <li><strong>Geef de playlist een naam</strong> bij <em>Jouw playlist</em>.</li>
           <li><strong>Klik op <em>Exporteer naar Spotify</em>.</strong> Je krijgt een knop <em>Open in Spotify</em>. De playlist staat dan in <em>Jouw bibliotheek</em> in Spotify en is privé tot je hem zelf deelt.</li>
@@ -51,8 +51,8 @@
             <option value="5">± 5</option>
           </select>
         </label>
-        <label>Genre <span class="opt">(optioneel)</span>
-          <input id="genre" type="text" list="genres" maxlength="40" placeholder="bv. dance, pop, hip hop" autocomplete="off">
+        <label>Genre
+          <input id="genre" type="text" list="genres" maxlength="40" placeholder="bv. dance, pop, hip hop" autocomplete="off" required>
           <datalist id="genres">
             <option value="pop"><option value="rock"><option value="dance"><option value="electronic">
             <option value="house"><option value="techno"><option value="hip hop"><option value="r&b">
@@ -61,13 +61,13 @@
             <option value="country"><option value="punk"><option value="folk"><option value="blues">
           </datalist>
         </label>
-        <label>Jouw land
-          <select id="country"></select>
-        </label>
-        <label class="check">
-          <input id="abroad" type="checkbox">
-          Ook nummers tonen die niet in mijn land populair zijn
-        </label>
+        <div class="years">
+          <span class="lbl">Uitgebracht tussen <strong id="year-label"></strong></span>
+          <div class="ranges">
+            <label>Van <input id="year-from" type="range" step="1" min="1950" max="2026" value="1950"></label>
+            <label>Tot <input id="year-to" type="range" step="1" min="1950" max="2026" value="2026"></label>
+          </div>
+        </div>
         <button type="submit" id="search-btn" class="primary">Zoek nummers</button>
       </form>
       <p id="status" role="status" aria-live="polite"></p>
@@ -120,7 +120,7 @@
   <footer>
     <p>
       Tempo (BPM) via <a href="https://reccobeats.com" target="_blank" rel="noopener">ReccoBeats</a> ·
-      Populaire nummers per land en genre via <a href="https://www.last.fm" target="_blank" rel="noopener">Last.fm</a> ·
+      Populaire nummers per genre via <a href="https://www.last.fm" target="_blank" rel="noopener">Last.fm</a> ·
       Nummers en export via Spotify. Deze site heeft geen accounts en slaat niets van je op op een server.
     </p>
   </footer>

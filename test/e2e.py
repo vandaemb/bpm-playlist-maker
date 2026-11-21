@@ -24,12 +24,12 @@ def titles(pg, sel):
     return [loc.nth(i).inner_text() for i in range(loc.count())]
 
 
-def search(pg, genre="", abroad=False, bpm="120", tol="2"):
+def search(pg, genre="pop", y_from="1950", y_to="2026", bpm="120", tol="2"):
     pg.fill("#bpm", bpm)
     pg.select_option("#tol", tol)
     pg.fill("#genre", genre)
-    pg.select_option("#country", "BE")
-    pg.set_checked("#abroad", abroad)
+    pg.fill("#year-from", y_from)
+    pg.fill("#year-to", y_to)
     pg.click("#search-btn")
     wait_until(lambda: ("gevonden" in pg.inner_text("#status") or "mislukt" in pg.inner_text("#status")) and pg.is_enabled("#search-btn"))
     return titles(pg, "#results")
@@ -73,27 +73,35 @@ with sync_playwright() as p:
     pg.add_init_script(spotify_mock.TOKEN_SCRIPT)
     spotify_mock.install(pg)
     pg.goto("http://127.0.0.1:8799/")
-    assert pg.locator("#country option").count() > 20
+    # jaarschuiven: standaard hele bereik; "van" duwt "tot" mee en omgekeerd
+    assert pg.input_value("#year-from") == "1950" and pg.input_value("#year-to") == "2026"
+    pg.fill("#year-from", "2000"); pg.fill("#year-to", "1990")
+    assert pg.input_value("#year-from") == "1990" and pg.input_value("#year-to") == "1990", (pg.input_value("#year-from"), pg.input_value("#year-to"))
+    pg.fill("#year-from", "1950"); pg.fill("#year-to", "2026")
 
     res = search(pg)
-    print("local:", res)
-    assert sorted(res) == sorted(["Belgian Banger", "Intl Pop", "<img src=x onerror=alert1>"]), res
+    print("alle jaren:", res)
+    assert sorted(res) == sorted(["Belgian Banger", "Intl Pop", "<img src=x onerror=alert1>", "Pop Hit"]), res
     assert pg.locator("#results img").count() == 0  # HTML-titel wordt als tekst getoond
-    assert "populair in België" in pg.locator("#results .row").first.inner_text()
+    assert "1985" in pg.locator("#results .row", has_text="Belgian Banger").inner_text()
 
-    res = search(pg, tol="0")
+    res = search(pg, y_from="1980", y_to="1999")
+    print("1980-1999:", res)
+    assert sorted(res) == ["Belgian Banger", "Intl Pop"], res
+
+    res = search(pg, y_from="2005", y_to="2026")
+    print("2005-2026:", res)
+    assert res == ["<img src=x onerror=alert1>"], res
+
+    res = search(pg, tol="0", y_from="1950", y_to="1999")
     print("exact:", res)
-    assert res == ["Belgian Banger"], res
+    assert sorted(res) == ["Belgian Banger", "Pop Hit"], res
 
-    res = search(pg, genre="pop")
-    print("pop local:", res)
-    assert res == ["Intl Pop"], res
+    pg.fill("#genre", "")
+    pg.click("#search-btn")
+    assert "genre" in pg.inner_text("#status")
 
-    res = search(pg, genre="pop", abroad=True)
-    print("pop abroad:", res)
-    assert sorted(res) == ["Intl Pop", "Pop Hit"], res
-
-    search(pg)
+    search(pg, y_from="1950", y_to="1999")
     pg.click("#add-top")
     wait_until(lambda: pg.locator("#pl-list .row").count() == 3)
     print("summary:", pg.inner_text("#pl-summary"))

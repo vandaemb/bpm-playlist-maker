@@ -1,6 +1,6 @@
 # BPM Playlist Maker
 
-Maak een Spotify-playlist op basis van **BPM**, **genre** en **jouw land**. Bewerk en sorteer de lijst, voeg zelf nummers toe en exporteer met één klik naar Spotify (of als CSV).
+Maak een Spotify-playlist op basis van **BPM**, **genre** en **uitgavejaar** (bereik met twee schuiven). Bewerk en sorteer de lijst, voeg zelf nummers toe en exporteer met één klik naar Spotify (of als CSV).
 
 ## Hoe het werkt (en waarom er geen logins zijn)
 
@@ -13,17 +13,17 @@ Maak een Spotify-playlist op basis van **BPM**, **genre** en **jouw land**. Bewe
 
 Er is geen gratis dienst die zomaar "geef me alle nummers van 120 BPM in genre X" beantwoordt. Daarom werkt de site in vier stappen, in rondes van 20 nummers zodat de eerste resultaten snel verschijnen:
 
-1. **Kandidaten** uit Last.fm: de populairste nummers van het gekozen land, en/of van het gekozen genre (tag).
+1. **Kandidaten** uit Last.fm: de populairste nummers van het gekozen genre (tag, tot 10 pagina's).
 2. **Spotify-zoeken** (met de token van de gebruiker): het echte nummer vinden (titel + artiest moeten overeenkomen).
 3. **Tempo** opvragen bij [ReccoBeats](https://reccobeats.com) (geen API-key nodig), per Spotify-ID.
 4. **Filteren** op de gekozen BPM ± marge.
 
-**Locatie** = het land van de gebruiker (standaard geraden uit de browsertaal, aanpasbaar). Zonder genre zijn de kandidaten de top van dat land. Met genre blijven alleen nummers over die in dat genre én (het nummer of de artiest) in dat land populair zijn, tenzij je "ook nummers tonen die niet in mijn land populair zijn" aanvinkt.
+**Periode** = het jaar uit de releasedatum van het album op Spotify. Dat is het jaar van de uitgave waarop Spotify het nummer vindt; bij heruitgaves of compilaties kan dat later zijn dan het originele jaar. Het jaarfilter gebeurt vóór de tempo-opvraging, dus een smal bereik kost vooral zoektijd.
 
 ## Belangrijke beperkingen
 
 1. **Spotify development mode**: sinds februari 2026 vereist dit een actief Premium-abonnement voor de app-eigenaar en werkt de app (zoeken én export) voor **maximaal 5 gebruikers** die je handmatig toevoegt onder *User Management* in het Developer Dashboard. Zonder Premium bij de eigenaar geeft Spotify een 403; de site toont dan een uitleg. Voor onbeperkt publiek vraagt Spotify "extended quota" (in de praktijk een organisatie met ~250.000 maandelijkse gebruikers).
-2. **Zoeken is trager en beperkter** dan met een BPM-database: de site moet per kandidaat een Spotify-zoekopdracht doen. Er zijn hooguit zo'n 250 kandidaten per land of genre (5 pagina's Last.fm), dus bij strenge combinaties (smalle marge + genre + land) kunnen er weinig resultaten zijn. Resultaten van eerdere zoekopdrachten worden in de proxy gecachet (tempo 7 dagen, Spotify-zoekopdrachten 6 uur, Last.fm 1 dag).
+2. **Zoeken is trager en beperkter** dan met een BPM-database: de site moet per kandidaat een Spotify-zoekopdracht doen. Er zijn hooguit zo'n 250 kandidaten per genre (10 pagina's Last.fm), dus bij strenge combinaties (smalle marge + smal jaarbereik) kunnen er weinig resultaten zijn. Resultaten van eerdere zoekopdrachten worden in de proxy gecachet (tempo 7 dagen, Spotify-zoekopdrachten 6 uur, Last.fm 1 dag).
 3. **ReccoBeats**: gratis, zonder key, maar met niet-gepubliceerde limieten en onduidelijke gebruiksvoorwaarden. Reageert de dienst niet (429/fout), dan meldt de site dat een deel niet gecontroleerd kon worden. Tempo's zijn schattingen; sommige nummers hebben dubbel of half tempo (bv. 60 i.p.v. 120).
 4. **Niet getest tegen de echte Last.fm- en Spotify-API's** (alleen de tempo-aanroep en de Last.fm-route zijn live gecontroleerd). De ReccoBeats-aanroep is wel met een echt verzoek gecontroleerd. De rest is getest met nagebootste antwoorden (unit-tests + echte browsertest).
 

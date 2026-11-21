@@ -132,3 +132,8 @@ footer a { color: inherit; }
 .connect { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
 #connect-state { font-weight: 600; color: var(--muted); }
 #connect-state.connected { color: var(--good); }
+
+.years { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; }
+.years .lbl { font-size: 0.9rem; font-weight: 600; }
+.years .ranges { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.years input[type="range"] { width: 100%; }

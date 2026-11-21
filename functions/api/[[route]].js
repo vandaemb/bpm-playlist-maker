@@ -134,7 +134,7 @@ const handlers = {
   async "lastfm-tag"(params, env) {
     const tag = textParam(params, "tag", 40);
     if (!/^[\p{L}\p{N} &'+.\-]+$/u.test(tag)) throw new BadRequest("Ongeldige parameter: tag");
-    const page = intParam(params, "page", 1, 5);
+    const page = intParam(params, "page", 1, 10);
     return lastfmTracks("tag.gettoptracks", { tag, page: String(page) }, env);
   },
 

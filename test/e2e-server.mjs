@@ -18,17 +18,13 @@ const idFor = (title) => (Buffer.from(title).toString("hex") + "x".repeat(22)).s
 const idToTempo = {};
 for (const [t, bpm] of Object.entries(TEMPO)) idToTempo[idFor(t)] = bpm;
 
-const COUNTRY = [
-  { name: "Belgian Banger", artist: { name: "Stromae" } },
-  { name: "Intl Pop", artist: { name: "Star" } },
-  { name: "Slow Song", artist: { name: "Calm" } },
-  { name: "<img src=x onerror=alert1>", artist: { name: "Evil" } },
-];
 const TAG_POP = [
   { name: "Intl Pop", artist: { name: "Star" } },
   { name: "Pop Hit", artist: { name: "Someone" } },
+  { name: "Belgian Banger", artist: { name: "Stromae" } },
+  { name: "<img src=x onerror=alert1>", artist: { name: "Evil" } },
+  { name: "Slow Song", artist: { name: "Calm" } },
 ];
-const CHART = [{ name: "Pop Hit", artist: { name: "Someone" } }];
 
 const json = (res, data, status = 200) => {
   res.writeHead(status, { "content-type": "application/json", ...secHeaders });
@@ -38,9 +34,7 @@ http
   .createServer((req, res) => {
     const u = new URL(req.url, "http://x");
     const page = u.searchParams.get("page");
-    if (u.pathname === "/api/lastfm") return json(res, { tracks: page === "1" ? COUNTRY.map((t) => ({ name: t.name, artist: t.artist.name })) : [] });
     if (u.pathname === "/api/lastfm-tag") return json(res, { tracks: page === "1" ? TAG_POP.map((t) => ({ name: t.name, artist: t.artist.name })) : [] });
-    if (u.pathname === "/api/chart") return json(res, { tracks: page === "1" ? CHART.map((t) => ({ name: t.name, artist: t.artist.name })) : [] });
     if (u.pathname === "/api/tempo") {
       const ids = (u.searchParams.get("ids") || "").split(",");
       return json(res, { tempos: Object.fromEntries(ids.map((i) => [i, idToTempo[i] ?? null])) });

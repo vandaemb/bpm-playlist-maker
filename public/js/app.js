@@ -73,7 +73,7 @@ async function pool(items, size, fn) {
 }
 
 // ---------- staat ----------
-const state = { results: [], resultsCountry: null, scan: null, scanId: 0, playlist: loadDraft(), dragFrom: -1, countries: [] };
+const state = { results: [], scan: null, scanId: 0, playlist: loadDraft(), dragFrom: -1 };
 
 function loadDraft() {
   try {
@@ -108,20 +108,36 @@ function setStatus(text, kind = "") {
   el.className = kind;
 }
 
-// ---------- landen ----------
-function setupCountries() {
-  const nl = new Intl.DisplayNames(["nl"], { type: "region" });
-  const en = new Intl.DisplayNames(["en"], { type: "region" });
-  state.countries = L.COUNTRY_CODES.map((code) => ({ ...L.makeCountry(code, en.of(code)), label: nl.of(code) })).sort((a, b) =>
-    a.label.localeCompare(b.label, "nl"),
-  );
-  const select = $("country");
-  for (const c of state.countries) select.append(h("option", { value: c.code }, c.label));
-  const guess = (navigator.language || "").split("-")[1]?.toUpperCase();
-  select.value = state.countries.some((c) => c.code === guess) ? guess : "BE";
+// ---------- jaarbereik ----------
+const MAX_YEAR = new Date().getFullYear();
+
+function setupYears() {
+  for (const id of ["year-from", "year-to"]) {
+    const el = $(id);
+    el.min = String(L.MIN_YEAR);
+    el.max = String(MAX_YEAR);
+  }
+  $("year-from").value = String(L.MIN_YEAR);
+  $("year-to").value = String(MAX_YEAR);
+  $("year-from").addEventListener("input", () => syncYears("from"));
+  $("year-to").addEventListener("input", () => syncYears("to"));
+  syncYears();
 }
 
-const currentCountry = () => state.countries.find((c) => c.code === $("country").value) || state.countries[0];
+// Houdt "van" altijd <= "tot": de schuif die je beweegt duwt de andere mee.
+function syncYears(moved) {
+  let from = Number($("year-from").value);
+  let to = Number($("year-to").value);
+  if (from > to) {
+    if (moved === "from") to = from;
+    else from = to;
+    $("year-from").value = String(from);
+    $("year-to").value = String(to);
+  }
+  $("year-label").textContent = from === to ? `${from}` : `${from} – ${to}`;
+}
+
+const currentYears = () => [Number($("year-from").value), Number($("year-to").value)];
 
 // ---------- zoeken ----------
 // Stappen: (1) kandidaten uit Last.fm (land en/of genre), (2) per kandidaat het echte nummer op
@@ -156,34 +172,20 @@ async function onSearch(ev) {
   }
   const tol = Number($("tol").value);
   const genre = $("genre").value.trim().slice(0, 40);
-  const country = currentCountry();
-  const abroad = $("abroad").checked;
+  if (!genre) return setStatus("Kies een genre (bv. pop, rock, dance).", "error");
+  const [yearFrom, yearTo] = currentYears();
 
   const id = ++state.scanId;
   state.scan = null;
   state.results = [];
-  state.resultsCountry = country;
   renderResults();
   $("search-btn").disabled = true;
   try {
-    setStatus(`Populaire muziek in ${country.label}${genre ? ` en genre "${genre}"` : ""} ophalen…`);
-    const [countryTracks, genreTracks, globalTracks] = await Promise.all([
-      fetchLastfm("/api/lastfm", { country: country.en }, 5),
-      genre ? fetchLastfm("/api/lastfm-tag", { tag: genre }, 5) : [],
-      !genre && abroad ? fetchLastfm("/api/chart", {}, 3) : [],
-    ]);
-    if (!countryTracks.length && !genreTracks.length) throw new Error("Last.fm gaf geen nummers terug. Probeer het later opnieuw.");
-    const local = L.buildLocalSet(countryTracks);
-    const candidates = L.buildPool({ local, countryTracks, genreTracks, globalTracks, genre, abroad });
-    if (!candidates.length) {
-      return setStatus(
-        genre
-          ? "Geen nummers gevonden die in dit genre én in jouw land populair zijn. Vink 'ook buiten mijn land' aan of kies een ander genre."
-          : "Geen kandidaten gevonden.",
-        "error",
-      );
-    }
-    state.scan = { id, candidates, index: 0, bpm, tol, country, found: [], keys: new Set(), running: false, failedBatches: 0, searchErrors: 0 };
+    setStatus(`Populaire nummers in het genre "${genre}" ophalen…`);
+    const genreTracks = await fetchLastfm("/api/lastfm-tag", { tag: genre }, 10);
+    if (!genreTracks.length) throw new Error("Last.fm gaf geen nummers terug voor dit genre. Controleer de spelling of probeer een ander genre.");
+    const candidates = L.buildPool({ genreTracks });
+    state.scan = { id, candidates, index: 0, bpm, tol, yearFrom, yearTo, found: [], keys: new Set(), running: false, failedBatches: 0, searchErrors: 0, outOfYears: 0 };
     await continueScan(FIRST_GOAL);
   } catch (err) {
     setStatus(`Zoeken mislukt: ${err.message}`, "error");
@@ -218,17 +220,20 @@ async function continueScan(extra) {
       if (fatal) throw fatal.error;
       scan.searchErrors += looked.filter((r) => !r.ok).length;
       const matched = looked.filter((r) => r.ok && r.value).map((r) => r.value);
-      if (!matched.length) continue;
+      // Jaarfilter vóór de tempo-opvraging: bespaart tempo-aanvragen.
+      const inYears = matched.filter((m) => L.yearMatches(m.best.year, scan.yearFrom, scan.yearTo));
+      scan.outOfYears += matched.length - inYears.length;
+      if (!inYears.length) continue;
 
       let tempos = {};
       try {
-        tempos = await fetchTempos([...new Set(matched.map((m) => m.spotifyId))]);
+        tempos = await fetchTempos([...new Set(inYears.map((m) => m.spotifyId))]);
       } catch {
         scan.failedBatches++;
         continue;
       }
       if (scan.id !== state.scanId) return;
-      for (const m of matched) {
+      for (const m of inYears) {
         const tempo = tempos[m.spotifyId];
         if (!L.tempoMatches(tempo, scan.bpm, scan.tol)) continue;
         const title = m.best.name;
@@ -244,7 +249,7 @@ async function continueScan(extra) {
           uri: m.best.uri,
           image: safeImage(m.best.image),
           durationMs: m.best.durationMs,
-          locScore: m.c.locScore,
+          year: m.best.year,
         });
       }
       state.results = scan.found;
@@ -269,20 +274,13 @@ async function continueScan(extra) {
   const exhausted = scan.index >= scan.candidates.length;
   const parts = [`${scan.found.length} nummers gevonden`];
   parts.push(exhausted ? "alle kandidaten zijn gecontroleerd" : `${scan.index} van ${scan.candidates.length} gecontroleerd, klik op "Meer zoeken" voor meer`);
-  if (!scan.found.length && exhausted) parts.push("probeer een grotere marge, een ander genre of vink 'ook buiten mijn land' aan");
+  if (!scan.found.length && exhausted) parts.push("probeer een grotere marge, een breder jaarbereik of een ander genre");
   if (scan.failedBatches) parts.push("een deel kon niet gecontroleerd worden (de tempo-dienst reageerde niet)");
   if (scan.searchErrors) parts.push(`${scan.searchErrors} zoekopdrachten bij Spotify mislukten`);
   setStatus(parts.join(" · "), scan.found.length ? "" : "error");
 }
 
-function localBadge(score, country) {
-  if (score === 2) return h("span", { class: "badge local" }, `populair in ${country.label}`);
-  if (score === 1) return h("span", { class: "badge" }, `artiest populair in ${country.label}`);
-  return null;
-}
-
 function renderResults() {
-  const country = state.resultsCountry;
   const scan = state.scan;
   $("results").replaceChildren(
     ...state.results.map((c) => {
@@ -291,7 +289,7 @@ function renderResults() {
         "li",
         { class: "row" },
         cover(c.image),
-        h("div", { class: "meta" }, h("strong", {}, c.title), h("span", {}, c.artist, country ? localBadge(c.locScore, country) : null)),
+        h("div", { class: "meta" }, h("strong", {}, c.title), h("span", {}, c.year ? `${c.artist} · ${c.year}` : c.artist)),
         h("div", { class: "bpm" }, `${c.bpm}`),
         h("button", { type: "button", class: "ghost", disabled: inList, onclick: () => addCandidate(c) }, inList ? "Toegevoegd" : "Toevoegen"),
       );
@@ -501,7 +499,7 @@ function downloadCsv() {
 
 // ---------- opstart ----------
 function init() {
-  setupCountries();
+  setupYears();
   $("pl-name").value = state.playlist.name;
   $("search-form").addEventListener("submit", onSearch);
   $("manual-form").addEventListener("submit", onManualSearch);

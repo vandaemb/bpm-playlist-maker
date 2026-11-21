@@ -3,19 +3,6 @@
 export const MIN_BPM = 40;
 export const MAX_BPM = 220;
 
-export const COUNTRY_CODES = [
-  "BE", "NL", "FR", "DE", "GB", "IE", "LU", "CH", "AT", "ES", "PT", "IT", "DK", "SE", "NO", "FI",
-  "PL", "CZ", "GR", "TR", "US", "CA", "MX", "BR", "AR", "CO", "CL", "AU", "NZ", "JP", "KR", "IN",
-  "ZA", "NG", "MA", "EG",
-];
-
-const LASTFM_NAME_OVERRIDES = { CZ: "Czech Republic", KR: "Korea, Republic of" };
-
-/** Last.fm verwacht Engelse landnamen. */
-export function makeCountry(code, enName) {
-  return { code, en: LASTFM_NAME_OVERRIDES[code] || String(enName || code) };
-}
-
 export function stripDiacritics(s) {
   return String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
@@ -54,42 +41,28 @@ export function tempoMatches(tempo, bpm, tolerance) {
   return Math.abs(Math.round(t) - Math.round(bpm)) <= Math.max(0, Number(tolerance) || 0);
 }
 
-/** Opzoek-set van lokaal populaire nummers/artiesten (bv. Last.fm top van een land). */
-export function buildLocalSet(tracks) {
-  const trackKeys = new Set();
-  const artists = new Set();
-  for (const t of tracks || []) {
-    if (!t || !t.name || !t.artist) continue;
-    trackKeys.add(normKey(t.name, t.artist));
-    artists.add(normText(t.artist));
-  }
-  return { trackKeys, artists };
+export const MIN_YEAR = 1950;
+
+/** Jaartal uit een Spotify-releasedatum ("1999", "1999-05" of "1999-05-21"), anders null. */
+export function releaseYear(date) {
+  const m = /^(\d{4})(?:-\d{2}(?:-\d{2})?)?$/.exec(String(date ?? ""));
+  return m ? Number(m[1]) : null;
 }
 
-/** 2 = nummer is populair in het land, 1 = artiest is er populair, 0 = geen link. */
-export function locationScore(c, local) {
-  if (!local) return 0;
-  if (local.trackKeys.has(normKey(c.title, c.artist))) return 2;
-  if (local.artists.has(normText(c.artist))) return 1;
-  return 0;
+/** Valt het jaar binnen het gekozen bereik (beide grenzen inbegrepen)? */
+export function yearMatches(year, from, to) {
+  if (!Number.isInteger(year)) return false;
+  const lo = Math.min(from, to);
+  const hi = Math.max(from, to);
+  return year >= lo && year <= hi;
 }
 
-/**
- * Stelt de kandidatenlijst samen die we daarna op Spotify zoeken en op tempo controleren.
- * - Zonder genre: de top van het land (en optioneel de wereldwijde top).
- * - Met genre: de top van dat genre; zonder "ook buiten mijn land" blijven alleen nummers/artiesten
- *   over die ook in het land populair zijn.
- */
-export function buildPool({ local, countryTracks = [], genreTracks = [], globalTracks = [], genre, abroad }) {
-  const base = genre ? genreTracks : abroad ? [...countryTracks, ...globalTracks] : countryTracks;
-  const items = dedupeBy(
-    base.filter((t) => t && t.name && t.artist).map((t) => ({ title: t.name, artist: t.artist })),
+/** Kandidatenlijst uit de Last.fm-top van het genre: ontdubbeld, in populariteitsvolgorde. */
+export function buildPool({ genreTracks = [] }) {
+  return dedupeBy(
+    genreTracks.filter((t) => t && t.name && t.artist).map((t) => ({ title: t.name, artist: t.artist })),
     (c) => normKey(c.title, c.artist),
   );
-  const scored = items.map((c) => ({ ...c, locScore: locationScore(c, local) }));
-  const kept = genre && !abroad ? scored.filter((c) => c.locScore > 0) : scored;
-  // Array.prototype.sort is stabiel: binnen dezelfde score blijft de Last.fm-volgorde (populariteit) behouden.
-  return kept.sort((a, b) => b.locScore - a.locScore);
 }
 
 export const SPOTIFY_TRACK_URI = /^spotify:track:[A-Za-z0-9]{22}$/;
@@ -144,6 +117,7 @@ export function mapSpotifyTracks(data) {
         album: String(t.album?.name ?? ""),
         image: images.length ? String(images[Math.min(1, images.length - 1)].url ?? "") : "",
         durationMs: Number(t.duration_ms) || 0,
+        year: releaseYear(t.album?.release_date),
       };
     });
 }
