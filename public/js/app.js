@@ -205,7 +205,7 @@ async function onSearch(ev) {
     const genreTracks = await fetchLastfm("/api/lastfm-tag", { tag: genre }, 10);
     if (!genreTracks.length) throw new Error("Last.fm gaf geen nummers terug voor dit genre. Controleer de spelling of probeer een ander genre.");
     const candidates = L.buildPool({ genreTracks });
-    state.scan = { id, candidates, index: 0, bpm, tol, yearFrom, yearTo, found: [], keys: new Set(), running: false, paused: "", failedBatches: 0, searchErrors: 0, outOfYears: 0, onSpotify: 0, withTempo: 0, noMatch: 0, sample: "" };
+    state.scan = { id, candidates, index: 0, bpm, tol, yearFrom, yearTo, found: [], keys: new Set(), running: false, paused: "", failedBatches: 0, searchErrors: 0, outOfYears: 0, onSpotify: 0, withTempo: 0, noMatch: 0, sample: "", lastSearchError: "" };
     await continueScan(FIRST_GOAL);
   } catch (err) {
     setStatus(`Zoeken mislukt: ${err.message}`, "error");
@@ -216,7 +216,7 @@ async function onSearch(ev) {
 
 // Laat zien waar nummers afvallen: handig om te zien welke stap weinig oplevert.
 function breakdown(scan) {
-  return `op Spotify gevonden: ${scan.onSpotify}, in jaarbereik: ${scan.onSpotify - scan.outOfYears}, met tempo: ${scan.withTempo}${scan.noMatch ? `, zonder passend Spotify-resultaat: ${scan.noMatch}` : ""}${scan.sample ? ` (${scan.sample})` : ""}`;
+  return `op Spotify gevonden: ${scan.onSpotify}, in jaarbereik: ${scan.onSpotify - scan.outOfYears}, met tempo: ${scan.withTempo}${scan.noMatch ? `, zonder passend Spotify-resultaat: ${scan.noMatch}` : ""}${scan.sample ? ` (${scan.sample})` : ""}${scan.searchErrors ? `, Spotify-fouten: ${scan.searchErrors} (laatste: ${scan.lastSearchError})` : ""}`;
 }
 
 async function continueScan(extra) {
@@ -238,7 +238,7 @@ async function continueScan(extra) {
 
       const token = S.getToken();
       if (!token) throw new S.SpotifyAuthError("Je Spotify-verbinding is verlopen. Verbind opnieuw met Spotify.");
-      const looked = await pool(batch, 3, async (c) => {
+      const looked = await pool(batch, 2, async (c) => {
         let tracks = await S.searchTracks(token, L.buildSearchQuery({ title: c.title, artist: c.artist }));
         // Soms geeft de gestructureerde zoekopdracht niets terug: probeer dan gewone tekst.
         if (!tracks.length) tracks = await S.searchTracks(token, L.buildSearchQuery({ q: `${c.artist} ${c.title}` }));
@@ -256,7 +256,9 @@ async function continueScan(extra) {
       // Fouten waar opnieuw proberen niets helpt (403/401) breken de zoekopdracht af met een duidelijke melding.
       const fatal = looked.find((r) => !r.ok && r.error instanceof S.SpotifyAuthError);
       if (fatal) throw fatal.error;
-      scan.searchErrors += looked.filter((r) => !r.ok).length;
+      const failed = looked.filter((r) => !r.ok);
+      scan.searchErrors += failed.length;
+      if (failed.length) scan.lastSearchError = failed[failed.length - 1].error.message;
       const matched = looked.filter((r) => r.ok && r.value).map((r) => r.value);
       scan.onSpotify += matched.length;
       // Jaarfilter vóór de tempo-opvraging: bespaart tempo-aanvragen.

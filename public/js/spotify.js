@@ -120,13 +120,13 @@ const FORBIDDEN_MESSAGE =
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function spotifyFetch(token, path, init = {}) {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     const res = await fetch(API + path, {
       ...init,
       headers: { Authorization: `Bearer ${token}`, ...(init.body ? { "Content-Type": "application/json" } : {}) },
     });
-    if (res.status === 429 && attempt === 0) {
-      await sleep(Math.min(5, Number(res.headers.get("Retry-After")) || 1) * 1000);
+    if (res.status === 429 && attempt < 3) {
+      await sleep(Math.min(20, Number(res.headers.get("Retry-After")) || 2 * (attempt + 1)) * 1000);
       continue;
     }
     if (res.status === 401) {
@@ -135,7 +135,13 @@ async function spotifyFetch(token, path, init = {}) {
     }
     if (res.status === 403) throw new SpotifyAuthError(FORBIDDEN_MESSAGE);
     if (res.status === 429) throw new Error("Spotify vraagt om even te wachten (te veel aanvragen). Probeer het zo opnieuw.");
-    if (!res.ok) throw new Error(`Spotify-fout ${res.status}.`);
+    if (!res.ok) {
+      let detail = "";
+      try {
+        detail = String((await res.json())?.error?.message ?? "").slice(0, 120);
+      } catch {}
+      throw new Error(`Spotify-fout ${res.status}${detail ? `: ${detail}` : ""}`);
+    }
     return res.json();
   }
   throw new Error("Spotify vraagt om even te wachten. Probeer het zo opnieuw.");
