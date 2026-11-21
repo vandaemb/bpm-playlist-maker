@@ -205,7 +205,7 @@ async function onSearch(ev) {
     const genreTracks = await fetchLastfm("/api/lastfm-tag", { tag: genre }, 10);
     if (!genreTracks.length) throw new Error("Last.fm gaf geen nummers terug voor dit genre. Controleer de spelling of probeer een ander genre.");
     const candidates = L.buildPool({ genreTracks });
-    state.scan = { id, candidates, index: 0, bpm, tol, yearFrom, yearTo, found: [], keys: new Set(), running: false, paused: "", failedBatches: 0, searchErrors: 0, outOfYears: 0, onSpotify: 0, withTempo: 0 };
+    state.scan = { id, candidates, index: 0, bpm, tol, yearFrom, yearTo, found: [], keys: new Set(), running: false, paused: "", failedBatches: 0, searchErrors: 0, outOfYears: 0, onSpotify: 0, withTempo: 0, noMatch: 0, sample: "" };
     await continueScan(FIRST_GOAL);
   } catch (err) {
     setStatus(`Zoeken mislukt: ${err.message}`, "error");
@@ -216,7 +216,7 @@ async function onSearch(ev) {
 
 // Laat zien waar nummers afvallen: handig om te zien welke stap weinig oplevert.
 function breakdown(scan) {
-  return `op Spotify gevonden: ${scan.onSpotify}, in jaarbereik: ${scan.onSpotify - scan.outOfYears}, met tempo: ${scan.withTempo}`;
+  return `op Spotify gevonden: ${scan.onSpotify}, in jaarbereik: ${scan.onSpotify - scan.outOfYears}, met tempo: ${scan.withTempo}${scan.noMatch ? `, zonder passend Spotify-resultaat: ${scan.noMatch}` : ""}${scan.sample ? ` (${scan.sample})` : ""}`;
 }
 
 async function continueScan(extra) {
@@ -239,8 +239,17 @@ async function continueScan(extra) {
       const token = S.getToken();
       if (!token) throw new S.SpotifyAuthError("Je Spotify-verbinding is verlopen. Verbind opnieuw met Spotify.");
       const looked = await pool(batch, 3, async (c) => {
-        const tracks = await S.searchTracks(token, L.buildSearchQuery({ title: c.title, artist: c.artist }));
+        let tracks = await S.searchTracks(token, L.buildSearchQuery({ title: c.title, artist: c.artist }));
+        // Soms geeft de gestructureerde zoekopdracht niets terug: probeer dan gewone tekst.
+        if (!tracks.length) tracks = await S.searchTracks(token, L.buildSearchQuery({ q: `${c.artist} ${c.title}` }));
         const best = L.pickBestMatch(tracks, c);
+        if (!best) {
+          scan.noMatch++;
+          if (!scan.sample) {
+            const f = tracks[0];
+            scan.sample = `bv. gezocht "${c.title} – ${c.artist}", Spotify gaf ${tracks.length} resultaten${f ? ` (eerste: "${f.name} – ${f.artists[0] || "?"}")` : ""}`.slice(0, 220);
+          }
+        }
         return best ? { c, best, spotifyId: L.spotifyIdFromUri(best.uri) } : null;
       });
       if (scan.id !== state.scanId) return;
