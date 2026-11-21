@@ -9,35 +9,11 @@ export const COUNTRY_CODES = [
   "ZA", "NG", "MA", "EG",
 ];
 
-// Alternatieve schrijfwijzen zoals ze in de "from"-velden van GetSongBPM kunnen voorkomen.
-const COUNTRY_ALIASES = {
-  GB: ["united kingdom", "uk", "england", "scotland", "wales", "northern ireland"],
-  US: ["united states", "usa", "u.s.", "u.s.a."],
-  NL: ["netherlands", "the netherlands", "holland"],
-  CZ: ["czechia", "czech republic"],
-  KR: ["south korea", "korea"],
-};
-
 const LASTFM_NAME_OVERRIDES = { CZ: "Czech Republic", KR: "Korea, Republic of" };
 
+/** Last.fm verwacht Engelse landnamen. */
 export function makeCountry(code, enName) {
-  const en = String(enName || code);
-  const names = new Set([stripDiacritics(en).toLowerCase(), ...(COUNTRY_ALIASES[code] || [])]);
-  return { code, en: LASTFM_NAME_OVERRIDES[code] || en, names: [...names] };
-}
-
-export function clamp(n, lo, hi) {
-  return Math.min(hi, Math.max(lo, n));
-}
-
-/** Alle gehele BPM-waarden binnen de tolerantie (max ±5, begrensd tot 40–220). */
-export function bpmRange(center, tolerance) {
-  const c = Math.round(Number(center));
-  if (!Number.isFinite(c)) return [];
-  const t = clamp(Math.round(Number(tolerance) || 0), 0, 5);
-  const out = [];
-  for (let b = c - t; b <= c + t; b++) if (b >= MIN_BPM && b <= MAX_BPM) out.push(b);
-  return out;
+  return { code, en: LASTFM_NAME_OVERRIDES[code] || String(enName || code) };
 }
 
 export function stripDiacritics(s) {
@@ -71,64 +47,14 @@ export function dedupeBy(list, keyFn) {
   return out;
 }
 
-/** GetSongBPM verpakt lijsten in een sleutel ({tempo:[...]}); soms is het direct een array. */
-export function parseList(json, key) {
-  if (Array.isArray(json)) return json;
-  const v = json && json[key];
-  return Array.isArray(v) ? v : [];
+/** Valt het gemeten tempo binnen de gekozen BPM ± marge? */
+export function tempoMatches(tempo, bpm, tolerance) {
+  const t = Number(tempo);
+  if (tempo == null || !Number.isFinite(t)) return false;
+  return Math.abs(Math.round(t) - Math.round(bpm)) <= Math.max(0, Number(tolerance) || 0);
 }
 
-export function parseArtist(json) {
-  const a = json && (json.artist ?? json);
-  if (Array.isArray(a)) return a[0] ?? null;
-  return a && typeof a === "object" ? a : null;
-}
-
-/** Zet een ruw tempo-object van GetSongBPM om naar ons eigen formaat. */
-export function normalizeTempoItem(raw) {
-  if (!raw || typeof raw !== "object") return null;
-  const a = Array.isArray(raw.artist) ? raw.artist[0] : raw.artist;
-  const artist = a && typeof a === "object" ? a : { name: a };
-  const bpm = parseInt(raw.tempo, 10);
-  const id = String(raw.song_id ?? raw.id ?? "");
-  const title = String(raw.song_title ?? raw.title ?? "").trim();
-  const artistName = String(artist.name ?? "").trim();
-  if (!id || !title || !artistName || !Number.isFinite(bpm)) return null;
-  return {
-    id,
-    title,
-    artist: artistName,
-    artistId: artist.id ? String(artist.id) : "",
-    bpm,
-    genres: Array.isArray(artist.genres) ? artist.genres.map(String) : [],
-    from: String(artist.from ?? ""),
-    hasArtistInfo: Array.isArray(artist.genres),
-  };
-}
-
-export function withArtist(candidate, artistJson) {
-  return {
-    ...candidate,
-    genres: Array.isArray(artistJson.genres) ? artistJson.genres.map(String) : candidate.genres,
-    from: String(artistJson.from ?? candidate.from ?? ""),
-    hasArtistInfo: true,
-  };
-}
-
-function normGenre(s) {
-  return stripDiacritics(s).toLowerCase().replace(/[-_/]+/g, " ").replace(/\s+/g, " ").trim();
-}
-
-export function genreMatches(genres, wanted) {
-  const w = normGenre(wanted);
-  if (!w) return true;
-  return genres.some((g) => {
-    const x = normGenre(g);
-    return x && (x.includes(w) || w.includes(x));
-  });
-}
-
-/** Maakt een opzoek-set van lokaal populaire nummers/artiesten (bv. Last.fm top van een land). */
+/** Opzoek-set van lokaal populaire nummers/artiesten (bv. Last.fm top van een land). */
 export function buildLocalSet(tracks) {
   const trackKeys = new Set();
   const artists = new Set();
@@ -140,38 +66,37 @@ export function buildLocalSet(tracks) {
   return { trackKeys, artists };
 }
 
-/** 3 = artiest komt uit het land, 2 = nummer is er populair, 1 = artiest is er populair, 0 = geen link. */
-export function locationScore(c, country, local) {
-  const from = stripDiacritics(c.from).toLowerCase();
-  if (country && from && country.names.some((n) => from.includes(n))) return 3;
-  if (local) {
-    if (local.trackKeys.has(normKey(c.title, c.artist))) return 2;
-    if (local.artists.has(normText(c.artist))) return 1;
-  }
+/** 2 = nummer is populair in het land, 1 = artiest is er populair, 0 = geen link. */
+export function locationScore(c, local) {
+  if (!local) return 0;
+  if (local.trackKeys.has(normKey(c.title, c.artist))) return 2;
+  if (local.artists.has(normText(c.artist))) return 1;
   return 0;
 }
 
-export function rankCandidates(cands, { bpm, genre, country, local, strict }) {
-  const scored = [];
-  for (const c of cands) {
-    if (genre && !genreMatches(c.genres, genre)) continue;
-    const score = locationScore(c, country, local);
-    if (strict && score === 0) continue;
-    scored.push({ ...c, locScore: score });
-  }
-  const unique = dedupeBy(
-    scored.sort((a, b) => b.locScore - a.locScore),
+/**
+ * Stelt de kandidatenlijst samen die we daarna op Spotify zoeken en op tempo controleren.
+ * - Zonder genre: de top van het land (en optioneel de wereldwijde top).
+ * - Met genre: de top van dat genre; zonder "ook buiten mijn land" blijven alleen nummers/artiesten
+ *   over die ook in het land populair zijn.
+ */
+export function buildPool({ local, countryTracks = [], genreTracks = [], globalTracks = [], genre, abroad }) {
+  const base = genre ? genreTracks : abroad ? [...countryTracks, ...globalTracks] : countryTracks;
+  const items = dedupeBy(
+    base.filter((t) => t && t.name && t.artist).map((t) => ({ title: t.name, artist: t.artist })),
     (c) => normKey(c.title, c.artist),
   );
-  return unique.sort(
-    (a, b) =>
-      b.locScore - a.locScore ||
-      Math.abs(a.bpm - bpm) - Math.abs(b.bpm - bpm) ||
-      a.title.localeCompare(b.title),
-  );
+  const scored = items.map((c) => ({ ...c, locScore: locationScore(c, local) }));
+  const kept = genre && !abroad ? scored.filter((c) => c.locScore > 0) : scored;
+  // Array.prototype.sort is stabiel: binnen dezelfde score blijft de Last.fm-volgorde (populariteit) behouden.
+  return kept.sort((a, b) => b.locScore - a.locScore);
 }
 
 export const SPOTIFY_TRACK_URI = /^spotify:track:[A-Za-z0-9]{22}$/;
+
+export function spotifyIdFromUri(uri) {
+  return SPOTIFY_TRACK_URI.test(String(uri)) ? String(uri).split(":")[2] : "";
+}
 
 /** Kiest uit Spotify-zoekresultaten het nummer dat echt overeenkomt, anders null. */
 export function pickBestMatch(tracks, item) {
@@ -242,7 +167,7 @@ function csvCell(v) {
 export function toCsv(items) {
   const rows = [["Titel", "Artiest", "BPM", "Spotify-link"]];
   for (const t of items) {
-    const id = t.uri ? t.uri.split(":")[2] : "";
+    const id = spotifyIdFromUri(t.uri);
     rows.push([t.title, t.artist, t.bpm ?? "", id ? `https://open.spotify.com/track/${id}` : ""]);
   }
   return rows.map((r) => r.map(csvCell).join(",")).join("\r\n");

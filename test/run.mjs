@@ -14,14 +14,16 @@ const test = async (name, fn) => {
     process.exitCode = 1;
   }
 };
+const uri = (c) => "spotify:track:" + c.repeat(22);
 
 // ---------------- logica ----------------
-await test("bpmRange: tolerantie, grenzen en clamping", () => {
-  assert.deepEqual(L.bpmRange(120, 2), [118, 119, 120, 121, 122]);
-  assert.deepEqual(L.bpmRange(41, 3), [40, 41, 42, 43, 44]);
-  assert.deepEqual(L.bpmRange(219, 5), [214, 215, 216, 217, 218, 219, 220]);
-  assert.deepEqual(L.bpmRange(120, 99).length, 11);
-  assert.deepEqual(L.bpmRange("abc", 1), []);
+await test("tempoMatches: marge, afronding, ontbrekend tempo", () => {
+  assert.equal(L.tempoMatches(120.4, 120, 0), true);
+  assert.equal(L.tempoMatches(121.6, 120, 1), false);
+  assert.equal(L.tempoMatches(121.4, 120, 1), true);
+  assert.equal(L.tempoMatches(null, 120, 5), false);
+  assert.equal(L.tempoMatches(undefined, 120, 5), false);
+  assert.equal(L.tempoMatches("abc", 120, 5), false);
 });
 
 await test("normKey negeert accenten, (remaster), feat. en hoofdletters", () => {
@@ -29,62 +31,42 @@ await test("normKey negeert accenten, (remaster), feat. en hoofdletters", () => 
   assert.equal(L.normKey("Song feat. X", "A & B"), L.normKey("Song", "A and B"));
 });
 
-await test("normalizeTempoItem: object- en array-artiest, ongeldige items", () => {
-  const raw = { song_id: "abc", song_title: "Blinding Lights", tempo: "171", artist: { id: "x1", name: "The Weeknd", genres: ["pop", "r&b"], from: "Canada" } };
-  const n = L.normalizeTempoItem(raw);
-  assert.equal(n.bpm, 171);
-  assert.equal(n.artistId, "x1");
-  assert.equal(n.hasArtistInfo, true);
-  assert.equal(L.normalizeTempoItem({ ...raw, artist: [raw.artist] }).artist, "The Weeknd");
-  const bare = L.normalizeTempoItem({ ...raw, artist: { id: "x1", name: "The Weeknd" } });
-  assert.equal(bare.hasArtistInfo, false);
-  assert.equal(L.normalizeTempoItem({ song_id: "1", song_title: "", tempo: "1", artist: { name: "a" } }), null);
-  assert.equal(L.normalizeTempoItem(null), null);
+await test("buildPool: zonder genre = landtop; wereldwijd alleen met 'abroad'", () => {
+  const countryTracks = [{ name: "A", artist: "X" }, { name: "B", artist: "Y" }];
+  const globalTracks = [{ name: "B", artist: "Y" }, { name: "G", artist: "Z" }];
+  const local = L.buildLocalSet(countryTracks);
+  const off = L.buildPool({ local, countryTracks, globalTracks, genre: "", abroad: false });
+  assert.deepEqual(off.map((c) => c.title), ["A", "B"]);
+  const on = L.buildPool({ local, countryTracks, globalTracks, genre: "", abroad: true });
+  assert.deepEqual(on.map((c) => c.title), ["A", "B", "G"]);
+  assert.equal(on[2].locScore, 0);
 });
 
-await test("parseList accepteert array, wrapper en rommel", () => {
-  assert.deepEqual(L.parseList({ tempo: [1] }, "tempo"), [1]);
-  assert.deepEqual(L.parseList([2], "tempo"), [2]);
-  assert.deepEqual(L.parseList({ tempo: { error: "no result" } }, "tempo"), []);
-  assert.deepEqual(L.parseList(null, "tempo"), []);
-});
-
-await test("genreMatches: deelstring, koppelteken, leeg = alles", () => {
-  assert.equal(L.genreMatches(["hip-hop", "rap"], "hip hop"), true);
-  assert.equal(L.genreMatches(["Dance Pop"], "pop"), true);
-  assert.equal(L.genreMatches(["rock"], "jazz"), false);
-  assert.equal(L.genreMatches([], "pop"), false);
-  assert.equal(L.genreMatches([], ""), true);
-});
-
-await test("ranking: land-score, strict, BPM-afstand en ontdubbeling", () => {
-  const be = L.makeCountry("BE", "Belgium");
-  const local = L.buildLocalSet([{ name: "Hit Local", artist: "Pop Ster" }]);
-  const mk = (id, title, artist, bpm, from = "", genres = ["pop"]) => ({ id, title, artist, bpm, from, genres });
-  const cands = [
-    mk("1", "Far", "Intl", 118),
-    mk("2", "Near", "Intl", 120),
-    mk("3", "Belgian", "Stromae", 119, "Brussels, Belgium"),
-    mk("4", "Hit Local", "Pop Ster", 121),
-    mk("5", "Belgian", "Stromae", 119, "Belgium"), // duplicaat
-    mk("6", "Rocker", "Band", 120, "Belgium", ["rock"]),
+await test("buildPool: met genre blijven alleen lokaal populaire over, tenzij 'abroad'; lokaal eerst", () => {
+  const countryTracks = [{ name: "Local Hit", artist: "Pop Ster" }];
+  const genreTracks = [
+    { name: "Foreign", artist: "Intl" },
+    { name: "Other Song", artist: "Pop Ster" }, // andere track, wel populaire artiest => score 1
+    { name: "Local Hit", artist: "Pop Ster" }, // zelfde track => score 2
   ];
-  const all = L.rankCandidates(cands, { bpm: 120, genre: "pop", country: be, local, strict: false });
-  assert.deepEqual(all.map((c) => c.title), ["Belgian", "Hit Local", "Near", "Far"]);
-  const strict = L.rankCandidates(cands, { bpm: 120, genre: "pop", country: be, local, strict: true });
-  assert.deepEqual(strict.map((c) => c.title), ["Belgian", "Hit Local"]);
-  assert.equal(all[0].locScore, 3);
-  assert.equal(all[1].locScore, 2);
+  const local = L.buildLocalSet(countryTracks);
+  const off = L.buildPool({ local, countryTracks, genreTracks, genre: "pop", abroad: false });
+  assert.deepEqual(off.map((c) => [c.title, c.locScore]), [["Local Hit", 2], ["Other Song", 1]]);
+  const on = L.buildPool({ local, countryTracks, genreTracks, genre: "pop", abroad: true });
+  assert.deepEqual(on.map((c) => c.title), ["Local Hit", "Other Song", "Foreign"]);
 });
 
-await test("makeCountry kent aliassen (UK) en Last.fm-naam", () => {
-  const gb = L.makeCountry("GB", "United Kingdom");
-  assert.ok(gb.names.includes("england"));
+await test("buildPool: ontdubbelt en negeert rommel", () => {
+  const t = [{ name: "A", artist: "X" }, { name: "a (live)", artist: "x" }, null, { name: "", artist: "Q" }];
+  assert.equal(L.buildPool({ local: null, countryTracks: t, genre: "", abroad: false }).length, 1);
+});
+
+await test("makeCountry: Last.fm-naam en overrides", () => {
+  assert.equal(L.makeCountry("BE", "Belgium").en, "Belgium");
   assert.equal(L.makeCountry("CZ", "Czechia").en, "Czech Republic");
 });
 
 await test("pickBestMatch kiest het juiste nummer en weigert verkeerde artiest", () => {
-  const uri = (c) => "spotify:track:" + c.repeat(22);
   const tracks = [
     { uri: uri("a"), name: "Blinding Lights", artists: ["Some Cover Band"] },
     { uri: uri("b"), name: "Blinding Lights - Remastered", artists: ["The Weeknd"] },
@@ -92,6 +74,11 @@ await test("pickBestMatch kiest het juiste nummer en weigert verkeerde artiest",
   assert.equal(L.pickBestMatch(tracks, { title: "Blinding Lights", artist: "The Weeknd" }).uri, uri("b"));
   assert.equal(L.pickBestMatch(tracks, { title: "Other Song", artist: "The Weeknd" }), null);
   assert.equal(L.pickBestMatch([{ uri: "spotify:track:short", name: "X", artists: ["Y"] }], { title: "X", artist: "Y" }), null);
+});
+
+await test("spotifyIdFromUri", () => {
+  assert.equal(L.spotifyIdFromUri(uri("a")), "a".repeat(22));
+  assert.equal(L.spotifyIdFromUri("spotify:track:../x"), "");
 });
 
 await test("moveItem en sortTracks (BPM met null achteraan, titel, shuffle behoudt items)", () => {
@@ -111,7 +98,7 @@ await test("moveItem en sortTracks (BPM met null achteraan, titel, shuffle behou
 });
 
 await test("toCsv: quotes, formule-injectie en Spotify-links", () => {
-  const csv = L.toCsv([{ title: '=HYPERLINK("x")', artist: 'A "B"', bpm: 120, uri: "spotify:track:" + "a".repeat(22) }]);
+  const csv = L.toCsv([{ title: '=HYPERLINK("x")', artist: 'A "B"', bpm: 120, uri: uri("a") }]);
   assert.match(csv, /"'=HYPERLINK\(""x""\)"/);
   assert.match(csv, /"A ""B"""/);
   assert.match(csv, /https:\/\/open\.spotify\.com\/track\/a{22}/);
@@ -149,79 +136,103 @@ globalThis.fetch = async (url, init = {}) => {
   calls.push({ url: u, init });
   const ok = (body) => new Response(JSON.stringify(body), { status: 200 });
   if (u.startsWith("https://accounts.spotify.com/api/token")) return ok({ access_token: "APPTOKEN", expires_in: 3600 });
-  if (u.startsWith("https://api.getsongbpm.com/tempo/")) return ok({ tempo: [{ song_id: "1", song_title: "T", tempo: "120", artist: { id: "a", name: "A" } }] });
-  if (u.startsWith("https://api.getsongbpm.com/artist/")) return ok({ artist: { id: "a", name: "A", genres: ["pop"], from: "Belgium" } });
-  if (u.startsWith("https://ws.audioscrobbler.com/")) return ok({ tracks: { track: [{ name: "N", artist: { name: "R" } }, { bad: true }] } });
+  if (u.startsWith("https://api.reccobeats.com/v1/audio-features")) {
+    const ids = new URL(u).searchParams.get("ids").split(",");
+    // ID's die met 'z' beginnen kent ReccoBeats niet.
+    return ok({ content: ids.filter((i) => !i.startsWith("z")).map((i) => ({ id: "uuid-" + i, href: "https://open.spotify.com/track/" + i, tempo: 120.5 })) });
+  }
+  if (u.startsWith("https://ws.audioscrobbler.com/")) {
+    const method = new URL(u).searchParams.get("method");
+    return ok({ tracks: { track: [{ name: method, artist: { name: "R" } }, { bad: true }] } });
+  }
   if (u.startsWith("https://api.spotify.com/v1/search")) {
-    return ok({ tracks: { items: [{ uri: "spotify:track:" + "a".repeat(22), name: "N", artists: [{ name: "R" }], album: { name: "Al", images: [{ url: "https://i.scdn.co/1" }, { url: "https://i.scdn.co/2" }] }, duration_ms: 1000 }] } });
+    return ok({ tracks: { items: [{ uri: uri("a"), name: "N", artists: [{ name: "R" }], album: { name: "Al", images: [{ url: "https://i.scdn.co/1" }, { url: "https://i.scdn.co/2" }] }, duration_ms: 1000 }] } });
   }
   return new Response("{}", { status: 500 });
 };
 
-const env = { GETSONGBPM_KEY: "KEY_GSB", LASTFM_KEY: "KEY_LFM", SPOTIFY_CLIENT_ID: "cid", SPOTIFY_CLIENT_SECRET: "SECRET" };
+const env = { LASTFM_KEY: "KEY_LFM", SPOTIFY_CLIENT_ID: "cid", SPOTIFY_CLIENT_SECRET: "SECRET" };
 const run = async (path, { headers = {}, e = env } = {}) => {
   const pending = [];
   const res = await onRequestGet({ request: new Request("https://site.test" + path, { headers }), env: e, waitUntil: (p) => pending.push(p) });
   await Promise.all(pending);
   return { res, body: await res.clone().json() };
 };
+const ID1 = "A".repeat(22), ID2 = "B".repeat(22), ID3 = "C".repeat(22), UNK = "z".repeat(22);
 
-await test("proxy: tempo gebruikt key als header (niet in URL) en cachet", async () => {
+await test("proxy: tempo geeft per Spotify-ID een tempo, null voor onbekend, zonder API-key", async () => {
   const before = calls.length;
-  const a = await run("/api/tempo?bpm=120");
-  assert.equal(a.res.status, 200);
-  assert.equal(a.body.tempo[0].song_id, "1");
-  const call = calls[before];
-  assert.equal(call.init.headers["X-API-KEY"], "KEY_GSB");
-  assert.ok(!call.url.includes("KEY_GSB"));
+  const { res, body } = await run(`/api/tempo?ids=${ID1},${ID2},${UNK}`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(body.tempos, { [ID1]: 120.5, [ID2]: 120.5, [UNK]: null });
+  assert.equal(res.headers.get("cache-control"), "no-store");
+  assert.ok(!calls[before].init.headers || !("X-API-KEY" in calls[before].init.headers));
+});
+
+await test("proxy: tempo cachet per ID en vraagt alleen ontbrekende ID's op", async () => {
   const n = calls.length;
-  await run("/api/tempo?bpm=120");
-  assert.equal(calls.length, n, "tweede aanvraag komt uit de cache");
+  const again = await run(`/api/tempo?ids=${ID1},${ID2},${ID3}`);
+  assert.equal(again.body.tempos[ID3], 120.5);
+  assert.equal(calls.length, n + 1, "één aanvraag, enkel voor het nieuwe ID");
+  assert.equal(new URL(calls[n].url).searchParams.get("ids"), ID3);
+  const n2 = calls.length;
+  await run(`/api/tempo?ids=${ID1},${ID2},${ID3},${UNK}`);
+  assert.equal(calls.length, n2, "alles uit de cache, ook het onbekende ID");
 });
 
 await test("proxy: invoer wordt gevalideerd", async () => {
-  for (const p of ["/api/tempo?bpm=10", "/api/tempo?bpm=abc", "/api/tempo", "/api/artist?id=../../x", "/api/lastfm?country=Belgium&page=9", "/api/lastfm?country=%3Cscript%3E&page=1", "/api/search?q=" + "x".repeat(101), "/api/search?title=x"]) {
-    const { res } = await run(p);
-    assert.equal(res.status, 400, p);
-  }
+  const many = Array.from({ length: 21 }, (_, i) => String.fromCharCode(65 + i).repeat(22)).join(",");
+  const bad = [
+    "/api/tempo", "/api/tempo?ids=abc", `/api/tempo?ids=${ID1},../../x`, `/api/tempo?ids=${many}`,
+    "/api/lastfm?country=Belgium&page=9", "/api/lastfm?country=%3Cscript%3E&page=1",
+    "/api/lastfm-tag?tag=%3Cb%3E&page=1", "/api/lastfm-tag?tag=pop&page=0", "/api/chart?page=4",
+    "/api/search?q=" + "x".repeat(101), "/api/search?title=x",
+  ];
+  for (const p of bad) assert.equal((await run(p)).res.status, 400, p);
   assert.equal((await run("/api/nope")).res.status, 404);
   assert.equal((await run("/api/constructor")).res.status, 404, "geen prototype-lookup");
+});
+
+await test("proxy: Last.fm-routes (land, genre, wereldtop) filteren rommel en gebruiken de juiste methode", async () => {
+  assert.deepEqual((await run("/api/lastfm?country=Belgium&page=1")).body.tracks, [{ name: "geo.gettoptracks", artist: "R" }]);
+  assert.deepEqual((await run("/api/lastfm-tag?tag=hip-hop&page=2")).body.tracks, [{ name: "tag.gettoptracks", artist: "R" }]);
+  assert.deepEqual((await run("/api/chart?page=1")).body.tracks, [{ name: "chart.gettoptracks", artist: "R" }]);
+  const tagCall = calls.findLast((c) => c.url.includes("tag.gettoptracks"));
+  assert.equal(new URL(tagCall.url).searchParams.get("tag"), "hip-hop");
 });
 
 await test("proxy: Spotify-search levert slank resultaat, secret lekt niet", async () => {
   const { res, body } = await run("/api/search?title=N%20(Remastered)&artist=R");
   assert.equal(res.status, 200);
-  assert.deepEqual(body.tracks[0], { uri: "spotify:track:" + "a".repeat(22), name: "N", artists: ["R"], album: "Al", image: "https://i.scdn.co/2", durationMs: 1000 });
+  assert.deepEqual(body.tracks[0], { uri: uri("a"), name: "N", artists: ["R"], album: "Al", image: "https://i.scdn.co/2", durationMs: 1000 });
   const searchCall = calls.findLast((c) => c.url.startsWith("https://api.spotify.com/v1/search"));
   assert.ok(searchCall.url.includes("track%3AN+artist%3AR"), searchCall.url);
   assert.ok(!JSON.stringify(body).includes("SECRET"));
   assert.equal(searchCall.init.headers.Authorization, "Bearer APPTOKEN");
 });
 
-await test("proxy: lastfm filtert rommel", async () => {
-  const { body } = await run("/api/lastfm?country=Belgium&page=1");
-  assert.deepEqual(body.tracks, [{ name: "N", artist: "R" }]);
-});
-
 await test("proxy: vreemde websites in de browser worden geweigerd", async () => {
-  assert.equal((await run("/api/artist?id=abc", { headers: { "Sec-Fetch-Site": "cross-site" } })).res.status, 403);
-  assert.equal((await run("/api/artist?id=abc", { headers: { "Sec-Fetch-Site": "same-origin" } })).res.status, 200);
+  assert.equal((await run(`/api/tempo?ids=${ID1}`, { headers: { "Sec-Fetch-Site": "cross-site" } })).res.status, 403);
+  assert.equal((await run(`/api/tempo?ids=${ID1}`, { headers: { "Sec-Fetch-Site": "same-origin" } })).res.status, 200);
 });
 
 await test("proxy: ontbrekende key geeft duidelijke fout zonder waarden te lekken", async () => {
-  const { res, body } = await run("/api/tempo?bpm=121", { e: { ...env, GETSONGBPM_KEY: "" } });
+  const { res, body } = await run("/api/chart?page=2", { e: { ...env, LASTFM_KEY: "" } });
   assert.equal(res.status, 500);
-  assert.match(body.error, /GETSONGBPM_KEY/);
+  assert.match(body.error, /LASTFM_KEY/);
 });
 
-await test("proxy: upstream-fout wordt 502 en niet gecachet", async () => {
+await test("proxy: upstream-fout (429) wordt 502 en niet gecachet", async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response("{}", { status: 429 });
-  const { res, body } = await run("/api/tempo?bpm=122");
+  const tempo = await run(`/api/tempo?ids=${"D".repeat(22)}`);
+  const chart = await run("/api/chart?page=3");
   globalThis.fetch = realFetch;
-  assert.equal(res.status, 502);
-  assert.match(body.error, /limiet/);
-  assert.equal(store.has("https://site.test/api/tempo?bpm=122"), false);
+  assert.equal(tempo.res.status, 502);
+  assert.match(tempo.body.error, /limiet/);
+  assert.equal(chart.res.status, 502);
+  assert.equal(store.has("https://site.test/api/chart?page=3"), false);
+  assert.equal(store.has(`https://cache.internal/tempo/${"D".repeat(22)}`), false);
 });
 
 await test("proxy: andere methoden geweigerd", () => {

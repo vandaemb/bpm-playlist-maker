@@ -1,15 +1,18 @@
 // Cloudflare Pages Function: de enige plek waar geheimen (API-keys) bestaan.
-// De browser praat alleen met deze proxy (zelfde domein), nooit rechtstreeks met GetSongBPM/Last.fm,
-// en het Spotify client secret komt nooit in de browser.
+// De browser praat alleen met deze proxy (zelfde domein). Het Spotify client secret en de
+// Last.fm-key komen nooit in de browser.
 //
 // Vereiste omgevingsvariabelen (Pages > Settings > Variables and secrets):
-//   GETSONGBPM_KEY, LASTFM_KEY, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
+//   LASTFM_KEY, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
+// ReccoBeats (tempo/BPM) vraagt geen key.
 
-const GSB = "https://api.getsongbpm.com";
+const RECCO = "https://api.reccobeats.com/v1";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 const SPOTIFY_API = "https://api.spotify.com/v1";
 const LASTFM = "https://ws.audioscrobbler.com/2.0/";
 const UPSTREAM_TIMEOUT_MS = 8000;
+const SPOTIFY_ID = /^[A-Za-z0-9]{22}$/;
+const MAX_IDS = 20;
 
 class BadRequest extends Error {}
 class Misconfigured extends Error {}
@@ -61,53 +64,95 @@ function intParam(params, name, lo, hi) {
 function textParam(params, name, max) {
   const raw = (params.get(name) || "").trim();
   if (!raw || raw.length > max) throw new BadRequest(`Ongeldige parameter: ${name}`);
-  // Geen control-tekens.
   if (/[\u0000-\u001f\u007f]/.test(raw)) throw new BadRequest(`Ongeldige parameter: ${name}`);
   return raw;
 }
 
 function spotifyTerm(s) {
-  // Haalt tekens weg die de Spotify-zoeksyntax kunnen verstoren, en (remaster)-achtervoegsels.
+  // Haalt tekens weg die de Spotify-zoeksyntax kunnen verstoren, en (remaster)-achtervoegels.
   return s.replace(/\(.*?\)|\[.*?\]/g, " ").replace(/["':\\]/g, " ").replace(/\s+/g, " ").trim();
 }
 
-// ---- Handlers: geven gewone objecten terug + de cache-duur in seconden. ----
-const handlers = {
-  async tempo(params, env) {
-    const bpm = intParam(params, "bpm", 40, 220);
-    const res = await upstreamFetch(`${GSB}/tempo/?${new URLSearchParams({ bpm: String(bpm), limit: "150" })}`, {
-      headers: { "X-API-KEY": need(env, "GETSONGBPM_KEY"), accept: "application/json" },
-    });
-    return { ttl: 86400, data: await res.json() };
-  },
+// ---- Last.fm ----
+async function lastfmTracks(method, extra, env) {
+  const url = `${LASTFM}?${new URLSearchParams({
+    method,
+    ...extra,
+    limit: "50",
+    api_key: need(env, "LASTFM_KEY"),
+    format: "json",
+  })}`;
+  const d = await (await upstreamFetch(url)).json();
+  const list = Array.isArray(d?.tracks?.track) ? d.tracks.track : [];
+  const tracks = list
+    .map((t) => ({ name: String(t?.name ?? ""), artist: String(t?.artist?.name ?? "") }))
+    .filter((t) => t.name && t.artist);
+  return { ttl: 86400, data: { tracks } };
+}
 
-  async artist(params, env) {
-    const id = textParam(params, "id", 16);
-    if (!/^[A-Za-z0-9]+$/.test(id)) throw new BadRequest("Ongeldige parameter: id");
-    const res = await upstreamFetch(`${GSB}/artist/?${new URLSearchParams({ id })}`, {
-      headers: { "X-API-KEY": need(env, "GETSONGBPM_KEY"), accept: "application/json" },
+// ---- Tempo (ReccoBeats): per Spotify-ID gecachet, zodat herhaalde zoekopdrachten niets kosten. ----
+const tempoKey = (id) => new Request(`https://cache.internal/tempo/${id}`);
+
+async function tempoFor(ids, waitUntil) {
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const tempos = {};
+  const missing = [];
+  for (const id of ids) {
+    const hit = cache ? await cache.match(tempoKey(id)) : null;
+    if (hit) tempos[id] = (await hit.json()).tempo;
+    else missing.push(id);
+  }
+  if (missing.length) {
+    const res = await upstreamFetch(`${RECCO}/audio-features?${new URLSearchParams({ ids: missing.join(",") })}`, {
+      headers: { accept: "application/json" },
     });
-    return { ttl: 7 * 86400, data: await res.json() };
+    const body = await res.json();
+    const list = Array.isArray(body) ? body : Array.isArray(body?.content) ? body.content : [];
+    const found = {};
+    for (const f of list) {
+      const m = /track\/([A-Za-z0-9]{22})/.exec(String(f?.href ?? ""));
+      const t = Number(f?.tempo);
+      if (m && Number.isFinite(t)) found[m[1]] = t;
+    }
+    for (const id of missing) {
+      const tempo = Object.hasOwn(found, id) ? found[id] : null;
+      tempos[id] = tempo;
+      if (cache) {
+        const ttl = tempo === null ? 86400 : 7 * 86400;
+        waitUntil(cache.put(tempoKey(id), new Response(JSON.stringify({ tempo }), { headers: { "cache-control": `public, max-age=${ttl}` } })));
+      }
+    }
+  }
+  return tempos;
+}
+
+// ---- Handlers: geven { ttl, data } terug. ttl 0 = niet cachen op URL-niveau. ----
+const handlers = {
+  async tempo(params, env, waitUntil) {
+    const ids = (params.get("ids") || "").split(",").filter(Boolean);
+    if (!ids.length || ids.length > MAX_IDS || !ids.every((i) => SPOTIFY_ID.test(i))) {
+      throw new BadRequest("Ongeldige parameter: ids");
+    }
+    return { ttl: 0, data: { tempos: await tempoFor([...new Set(ids)], waitUntil) } };
   },
 
   async lastfm(params, env) {
     const country = textParam(params, "country", 60);
     if (!/^[A-Za-z][A-Za-z .,'()-]*$/.test(country)) throw new BadRequest("Ongeldige parameter: country");
+    const page = intParam(params, "page", 1, 5);
+    return lastfmTracks("geo.gettoptracks", { country, page: String(page) }, env);
+  },
+
+  async "lastfm-tag"(params, env) {
+    const tag = textParam(params, "tag", 40);
+    if (!/^[\p{L}\p{N} &'+.\-]+$/u.test(tag)) throw new BadRequest("Ongeldige parameter: tag");
+    const page = intParam(params, "page", 1, 5);
+    return lastfmTracks("tag.gettoptracks", { tag, page: String(page) }, env);
+  },
+
+  async chart(params, env) {
     const page = intParam(params, "page", 1, 3);
-    const url = `${LASTFM}?${new URLSearchParams({
-      method: "geo.gettoptracks",
-      country,
-      limit: "50",
-      page: String(page),
-      api_key: need(env, "LASTFM_KEY"),
-      format: "json",
-    })}`;
-    const d = await (await upstreamFetch(url)).json();
-    const list = Array.isArray(d?.tracks?.track) ? d.tracks.track : [];
-    const tracks = list
-      .map((t) => ({ name: String(t?.name ?? ""), artist: String(t?.artist?.name ?? "") }))
-      .filter((t) => t.name && t.artist);
-    return { ttl: 86400, data: { tracks } };
+    return lastfmTracks("chart.gettoptracks", { page: String(page) }, env);
   },
 
   async search(params, env) {
@@ -144,6 +189,8 @@ const handlers = {
   },
 };
 
+const NO_URL_CACHE = new Set(["tempo"]);
+
 // Blokkeert andere websites die jouw proxy (en dus jouw API-quota) willen meebenutten.
 // Browsers sturen Sec-Fetch-Site mee en dat kan een pagina niet vervalsen.
 function isForeignBrowserRequest(request) {
@@ -161,16 +208,16 @@ export async function onRequestGet(context) {
     const handler = Object.hasOwn(handlers, name) ? handlers[name] : null;
     if (!handler) return json({ error: "Onbekende route." }, 404);
 
-    const cache = typeof caches !== "undefined" ? caches.default : null;
+    const useCache = !NO_URL_CACHE.has(name) && typeof caches !== "undefined";
     const cacheKey = new Request(url.toString(), { method: "GET" });
-    if (cache) {
-      const hit = await cache.match(cacheKey);
+    if (useCache) {
+      const hit = await caches.default.match(cacheKey);
       if (hit) return hit;
     }
 
-    const { ttl, data } = await handler(url.searchParams, env);
-    const response = json(data, 200, { "cache-control": `public, max-age=${ttl}` });
-    if (cache) waitUntil(cache.put(cacheKey, response.clone()));
+    const { ttl, data } = await handler(url.searchParams, env, waitUntil);
+    const response = json(data, 200, { "cache-control": ttl ? `public, max-age=${ttl}` : "no-store" });
+    if (useCache && ttl) waitUntil(caches.default.put(cacheKey, response.clone()));
     return response;
   } catch (err) {
     if (err instanceof BadRequest) return json({ error: err.message }, 400);

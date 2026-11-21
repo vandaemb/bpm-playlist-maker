@@ -31,7 +31,6 @@ with sync_playwright() as p:
     pg.goto("http://127.0.0.1:8799/")
     pg.fill("#manual-q", "Eigen Nummer"); pg.click("#manual-form button")
     pg.wait_for_selector("#manual-results .row"); pg.click("#manual-results .row button")
-    pg.wait_for_function("!document.querySelector('#pl-summary').textContent.includes('nog te zoeken')")
     pg.click("#export-btn"); pg.wait_for_timeout(800)
     q = parse_qs(urlparse(auth["url"]).query)
     print({k: v[0] for k, v in q.items() if k != "code_challenge"})

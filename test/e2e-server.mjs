@@ -11,28 +11,52 @@ for (const line of headersFile.split("\n").slice(1)) {
   if (m) secHeaders[m[1]] = m[2];
 }
 const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css" };
-const uri = (c) => "spotify:track:" + c.repeat(22);
-const tempo = [
-  { song_id: "1", song_title: "Belgian Banger", tempo: "120", artist: { id: "a1", name: "Stromae", genres: ["pop", "dance"], from: "Brussels, Belgium" } },
-  { song_id: "2", song_title: "Intl Pop", tempo: "119", artist: { id: "a2", name: "Star", genres: ["pop"], from: "USA" } },
-  { song_id: "3", song_title: "Metal Thing", tempo: "121", artist: { id: "a3", name: "Heavy", genres: ["metal"], from: "Sweden" } },
-  { song_id: "4", song_title: "<img src=x onerror=alert(1)>", tempo: "120", artist: { id: "a4", name: "Evil", genres: ["pop"], from: "Belgium" } },
+
+// Tempo per nummer (titel). Het Spotify-ID wordt afgeleid van de titel.
+const TEMPO = { "Belgian Banger": 120, "Intl Pop": 119, "Slow Song": 80, "<img src=x onerror=alert(1)>": 121, "Pop Hit": 120 };
+const idFor = (title) => (Buffer.from(title).toString("hex") + "x".repeat(22)).slice(0, 22);
+const idToTempo = {};
+for (const [t, bpm] of Object.entries(TEMPO)) idToTempo[idFor(t)] = bpm;
+
+const COUNTRY = [
+  { name: "Belgian Banger", artist: { name: "Stromae" } },
+  { name: "Intl Pop", artist: { name: "Star" } },
+  { name: "Slow Song", artist: { name: "Calm" } },
+  { name: "<img src=x onerror=alert(1)>", artist: { name: "Evil" } },
 ];
+const TAG_POP = [
+  { name: "Intl Pop", artist: { name: "Star" } },
+  { name: "Pop Hit", artist: { name: "Someone" } },
+];
+const CHART = [{ name: "Pop Hit", artist: { name: "Someone" } }];
+
 const json = (res, data, status = 200) => {
   res.writeHead(status, { "content-type": "application/json", ...secHeaders });
   res.end(JSON.stringify(data));
 };
-http.createServer((req, res) => {
-  const u = new URL(req.url, "http://x");
-  if (u.pathname === "/api/tempo") return json(res, { tempo });
-  if (u.pathname === "/api/lastfm") return json(res, { tracks: [{ name: "Intl Pop", artist: "Star" }] });
-  if (u.pathname === "/api/search") {
-    const q = u.searchParams.get("title") || u.searchParams.get("q") || "x";
-    const artist = u.searchParams.get("artist") || "Manual Artist";
-    return json(res, { tracks: [{ uri: uri(q.length % 2 ? "a" : "b"), name: u.searchParams.get("title") || q, artists: [artist], album: "Album", image: "", durationMs: 200000 }] });
-  }
-  const file = path.join(root, u.pathname === "/" ? "index.html" : u.pathname);
-  if (!file.startsWith(root) || !fs.existsSync(file)) { res.writeHead(404); return res.end(); }
-  res.writeHead(200, { "content-type": types[path.extname(file)] || "text/plain", ...secHeaders });
-  res.end(fs.readFileSync(file));
-}).listen(8799, "127.0.0.1", () => console.log("up"));
+http
+  .createServer((req, res) => {
+    const u = new URL(req.url, "http://x");
+    const page = u.searchParams.get("page");
+    if (u.pathname === "/api/lastfm") return json(res, { tracks: page === "1" ? COUNTRY.map((t) => ({ name: t.name, artist: t.artist.name })) : [] });
+    if (u.pathname === "/api/lastfm-tag") return json(res, { tracks: page === "1" ? TAG_POP.map((t) => ({ name: t.name, artist: t.artist.name })) : [] });
+    if (u.pathname === "/api/chart") return json(res, { tracks: page === "1" ? CHART.map((t) => ({ name: t.name, artist: t.artist.name })) : [] });
+    if (u.pathname === "/api/tempo") {
+      const ids = (u.searchParams.get("ids") || "").split(",");
+      return json(res, { tempos: Object.fromEntries(ids.map((i) => [i, idToTempo[i] ?? null])) });
+    }
+    if (u.pathname === "/api/search") {
+      const title = u.searchParams.get("title") || u.searchParams.get("q") || "x";
+      const artist = u.searchParams.get("artist") || "Manual Artist";
+      if (u.searchParams.get("title") === "Unknown Track") return json(res, { tracks: [] });
+      return json(res, { tracks: [{ uri: "spotify:track:" + idFor(title), name: title, artists: [artist], album: "Album", image: "", durationMs: 200000 }] });
+    }
+    const file = path.join(root, u.pathname === "/" ? "index.html" : u.pathname);
+    if (!file.startsWith(root) || !fs.existsSync(file)) {
+      res.writeHead(404);
+      return res.end();
+    }
+    res.writeHead(200, { "content-type": types[path.extname(file)] || "text/plain", ...secHeaders });
+    res.end(fs.readFileSync(file));
+  })
+  .listen(8799, "127.0.0.1", () => console.log("up"));

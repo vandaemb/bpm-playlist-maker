@@ -5,6 +5,9 @@ import * as S from "./spotify.js";
 const $ = (id) => document.getElementById(id);
 const DRAFT_KEY = "bpm-playlist-draft-v1";
 const PENDING_KEY = "bpm-playlist-pending-export";
+const BATCH = 20; // kandidaten per ronde (ook max. aantal ID's per tempo-aanvraag)
+const FIRST_GOAL = 30;
+const MORE_GOAL = 25;
 
 // ---------- kleine DOM-helper: gebruikt uitsluitend textContent, nooit innerHTML ----------
 function h(tag, props = {}, ...kids) {
@@ -35,6 +38,8 @@ function cover(url) {
   const src = safeImage(url);
   return src ? h("img", { class: "cover", src, alt: "", loading: "lazy", width: 44, height: 44 }) : h("div", { class: "cover" });
 }
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- netwerk ----------
 async function api(path, params = {}) {
@@ -69,7 +74,7 @@ async function pool(items, size, fn) {
 }
 
 // ---------- staat ----------
-const state = { results: [], playlist: loadDraft(), dragFrom: -1, countries: [] };
+const state = { results: [], resultsCountry: null, scan: null, scanId: 0, playlist: loadDraft(), dragFrom: -1, countries: [] };
 
 function loadDraft() {
   try {
@@ -85,7 +90,6 @@ function loadDraft() {
         uri: i.uri,
         image: safeImage(i.image),
         durationMs: Number(i.durationMs) || 0,
-        status: "ok",
       }));
     return { name: String(d.name || "Mijn BPM-playlist").slice(0, 100), items };
   } catch {
@@ -95,8 +99,7 @@ function loadDraft() {
 
 function saveDraft() {
   try {
-    const items = state.playlist.items.filter((i) => i.status === "ok");
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ name: state.playlist.name, items }));
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(state.playlist));
   } catch {}
 }
 
@@ -122,6 +125,26 @@ function setupCountries() {
 const currentCountry = () => state.countries.find((c) => c.code === $("country").value) || state.countries[0];
 
 // ---------- zoeken ----------
+// Stappen: (1) kandidaten uit Last.fm (land en/of genre), (2) per kandidaat het echte nummer op
+// Spotify zoeken, (3) het tempo van die nummers opvragen (ReccoBeats), (4) filteren op BPM.
+// Dat gebeurt in rondes van 20, zodat de eerste resultaten snel verschijnen.
+async function fetchLastfm(path, params, pages) {
+  const settled = await Promise.allSettled(Array.from({ length: pages }, (_, i) => api(path, { ...params, page: i + 1 })));
+  return settled.filter((r) => r.status === "fulfilled").flatMap((r) => r.value.tracks || []);
+}
+
+async function fetchTempos(ids) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return (await api("/api/tempo", { ids: ids.join(",") })).tempos || {};
+    } catch (err) {
+      if (attempt === 0) await sleep(1500);
+      else throw err;
+    }
+  }
+  return {};
+}
+
 async function onSearch(ev) {
   ev.preventDefault();
   const bpm = Number($("bpm").value);
@@ -131,57 +154,34 @@ async function onSearch(ev) {
   const tol = Number($("tol").value);
   const genre = $("genre").value.trim().slice(0, 40);
   const country = currentCountry();
-  const strict = $("strict").checked;
+  const abroad = $("abroad").checked;
 
+  const id = ++state.scanId;
+  state.scan = null;
+  state.results = [];
+  state.resultsCountry = country;
+  renderResults();
   $("search-btn").disabled = true;
-  $("results").replaceChildren();
-  $("results-head").hidden = true;
   try {
-    setStatus("Nummers met dit tempo ophalen…");
-    const values = L.bpmRange(bpm, tol);
-    const tempoRes = await pool(values, 4, (v) => api("/api/tempo", { bpm: v }));
-    const good = tempoRes.filter((r) => r.ok);
-    if (!good.length) throw tempoRes[0].error;
-
-    let cands = L.dedupeBy(
-      good.flatMap((r) => L.parseList(r.value, "tempo")).map(L.normalizeTempoItem).filter(Boolean),
-      (c) => c.id,
-    );
-
-    // Ontbreken genre/herkomst in de tempo-lijst, dan vragen we die per artiest op (max 120).
-    const missing = [...new Set(cands.filter((c) => !c.hasArtistInfo && c.artistId).map((c) => c.artistId))];
-    const capped = missing.slice(0, 120);
-    if (capped.length) {
-      const arts = await pool(capped, 4, (id, i) => {
-        setStatus(`Artiesten controleren… (${i + 1}/${capped.length})`);
-        return api("/api/artist", { id });
-      });
-      const byId = new Map();
-      arts.forEach((r, i) => {
-        const a = r.ok ? L.parseArtist(r.value) : null;
-        if (a) byId.set(capped[i], a);
-      });
-      cands = cands.map((c) => (byId.has(c.artistId) ? L.withArtist(c, byId.get(c.artistId)) : c));
+    setStatus(`Populaire muziek in ${country.label}${genre ? ` en genre "${genre}"` : ""} ophalen…`);
+    const [countryTracks, genreTracks, globalTracks] = await Promise.all([
+      fetchLastfm("/api/lastfm", { country: country.en }, 5),
+      genre ? fetchLastfm("/api/lastfm-tag", { tag: genre }, 5) : [],
+      !genre && abroad ? fetchLastfm("/api/chart", {}, 3) : [],
+    ]);
+    if (!countryTracks.length && !genreTracks.length) throw new Error("Last.fm gaf geen nummers terug. Probeer het later opnieuw.");
+    const local = L.buildLocalSet(countryTracks);
+    const candidates = L.buildPool({ local, countryTracks, genreTracks, globalTracks, genre, abroad });
+    if (!candidates.length) {
+      return setStatus(
+        genre
+          ? "Geen nummers gevonden die in dit genre én in jouw land populair zijn. Vink 'ook buiten mijn land' aan of kies een ander genre."
+          : "Geen kandidaten gevonden.",
+        "error",
+      );
     }
-
-    setStatus(`Lokale populariteit in ${country.label} ophalen…`);
-    let local = null;
-    let localFailed = false;
-    try {
-      const pages = await Promise.all([1, 2, 3].map((page) => api("/api/lastfm", { country: country.en, page })));
-      local = L.buildLocalSet(pages.flatMap((p) => p.tracks || []));
-    } catch {
-      localFailed = true;
-    }
-
-    state.results = L.rankCandidates(cands, { bpm, genre, country, local, strict }).slice(0, 100);
-    renderResults(country);
-
-    const parts = [`${state.results.length} nummers gevonden`];
-    if (!state.results.length) parts.push("probeer een grotere marge, een ander genre of zet de landfilter uit");
-    if (missing.length > capped.length) parts.push(`slechts ${capped.length} van ${missing.length} artiesten gecontroleerd`);
-    if (localFailed) parts.push("lokale populariteit was niet beschikbaar");
-    setStatus(parts.join(" · "), state.results.length ? "" : "error");
+    state.scan = { id, candidates, index: 0, bpm, tol, country, found: [], keys: new Set(), running: false, failedBatches: 0 };
+    await continueScan(FIRST_GOAL);
   } catch (err) {
     setStatus(`Zoeken mislukt: ${err.message}`, "error");
   } finally {
@@ -189,90 +189,124 @@ async function onSearch(ev) {
   }
 }
 
+async function continueScan(extra) {
+  const scan = state.scan;
+  if (!scan || scan.running) return;
+  scan.running = true;
+  $("search-btn").disabled = true;
+  $("more-btn").disabled = true;
+  const goal = scan.found.length + extra;
+  try {
+    while (scan.found.length < goal && scan.index < scan.candidates.length && scan.id === state.scanId) {
+      const batch = scan.candidates.slice(scan.index, scan.index + BATCH);
+      scan.index += batch.length;
+      setStatus(`Zoeken… ${scan.index} van ${scan.candidates.length} nummers gecontroleerd · ${scan.found.length} gevonden`);
+
+      const looked = await pool(batch, 4, async (c) => {
+        const { tracks } = await api("/api/search", { title: c.title, artist: c.artist });
+        const best = L.pickBestMatch(tracks, c);
+        return best ? { c, best, spotifyId: L.spotifyIdFromUri(best.uri) } : null;
+      });
+      if (scan.id !== state.scanId) return;
+      const matched = looked.filter((r) => r.ok && r.value).map((r) => r.value);
+      if (!matched.length) continue;
+
+      let tempos = {};
+      try {
+        tempos = await fetchTempos([...new Set(matched.map((m) => m.spotifyId))]);
+      } catch {
+        scan.failedBatches++;
+        continue;
+      }
+      if (scan.id !== state.scanId) return;
+      for (const m of matched) {
+        const tempo = tempos[m.spotifyId];
+        if (!L.tempoMatches(tempo, scan.bpm, scan.tol)) continue;
+        const title = m.best.name;
+        const artist = m.best.artists[0] || m.c.artist;
+        const key = L.normKey(title, artist);
+        if (scan.keys.has(key)) continue;
+        scan.keys.add(key);
+        scan.found.push({
+          key,
+          title,
+          artist,
+          bpm: Math.round(tempo),
+          uri: m.best.uri,
+          image: safeImage(m.best.image),
+          durationMs: m.best.durationMs,
+          locScore: m.c.locScore,
+        });
+      }
+      state.results = scan.found;
+      renderResults();
+    }
+  } catch (err) {
+    if (scan.id === state.scanId) setStatus(`Zoeken mislukt: ${err.message}`, "error");
+    return;
+  } finally {
+    scan.running = false;
+    if (scan.id === state.scanId) {
+      $("search-btn").disabled = false;
+      $("more-btn").disabled = false;
+      renderResults();
+    }
+  }
+  if (scan.id !== state.scanId) return;
+
+  const exhausted = scan.index >= scan.candidates.length;
+  const parts = [`${scan.found.length} nummers gevonden`];
+  parts.push(exhausted ? "alle kandidaten zijn gecontroleerd" : `${scan.index} van ${scan.candidates.length} gecontroleerd, klik op "Meer zoeken" voor meer`);
+  if (!scan.found.length && exhausted) parts.push("probeer een grotere marge, een ander genre of vink 'ook buiten mijn land' aan");
+  if (scan.failedBatches) parts.push("een deel kon niet gecontroleerd worden (de tempo-dienst reageerde niet)");
+  setStatus(parts.join(" · "), scan.found.length ? "" : "error");
+}
+
 function localBadge(score, country) {
-  if (score === 3) return h("span", { class: "badge local" }, `uit ${country.label}`);
   if (score === 2) return h("span", { class: "badge local" }, `populair in ${country.label}`);
   if (score === 1) return h("span", { class: "badge" }, `artiest populair in ${country.label}`);
   return null;
 }
 
-function renderResults(country) {
-  const list = $("results");
-  list.replaceChildren(
+function renderResults() {
+  const country = state.resultsCountry;
+  const scan = state.scan;
+  $("results").replaceChildren(
     ...state.results.map((c) => {
-      const key = L.normKey(c.title, c.artist);
-      const inList = state.playlist.items.some((i) => i.key === key);
+      const inList = state.playlist.items.some((i) => i.key === c.key);
       return h(
         "li",
         { class: "row" },
-        h("div", { class: "meta" }, h("strong", {}, c.title), h("span", {}, c.artist, localBadge(c.locScore, country))),
+        cover(c.image),
+        h("div", { class: "meta" }, h("strong", {}, c.title), h("span", {}, c.artist, country ? localBadge(c.locScore, country) : null)),
         h("div", { class: "bpm" }, `${c.bpm}`),
         h("button", { type: "button", class: "ghost", disabled: inList, onclick: () => addCandidate(c) }, inList ? "Toegevoegd" : "Toevoegen"),
       );
     }),
   );
-  $("results-head").hidden = state.results.length === 0;
-  state.resultsCountry = country;
+  $("results-head").hidden = state.results.length === 0 && !(scan && scan.index < scan.candidates.length);
+  $("add-top").disabled = state.results.length === 0;
+  $("more-btn").hidden = !(scan && scan.index < scan.candidates.length);
 }
 
 function addCandidate(c) {
-  addToPlaylist({ title: c.title, artist: c.artist, bpm: c.bpm });
-  renderResults(state.resultsCountry);
-}
-
-// ---------- Spotify-matching op de achtergrond ----------
-const queue = [];
-let active = 0;
-
-function queueResolve(item) {
-  queue.push(item);
-  pump();
-}
-
-function pump() {
-  while (active < 3 && queue.length) {
-    const item = queue.shift();
-    active++;
-    resolveItem(item).finally(() => {
-      active--;
-      pump();
-    });
-  }
-}
-
-async function resolveItem(item) {
-  item.status = "pending";
-  try {
-    const { tracks } = await api("/api/search", { title: item.title, artist: item.artist });
-    const best = L.pickBestMatch(tracks, item);
-    if (best) {
-      Object.assign(item, { uri: best.uri, image: safeImage(best.image), durationMs: best.durationMs, status: "ok" });
-    } else {
-      item.status = "missing";
-    }
-  } catch {
-    item.status = "error";
-  }
-  renderPlaylist();
-  saveDraft();
+  addToPlaylist({ title: c.title, artist: c.artist, bpm: c.bpm, uri: c.uri, image: c.image, durationMs: c.durationMs });
 }
 
 // ---------- playlist ----------
 function addToPlaylist(t) {
+  if (!L.SPOTIFY_TRACK_URI.test(String(t.uri))) return false;
   const key = L.normKey(t.title, t.artist);
   if (state.playlist.items.some((i) => i.key === key)) return false;
-  const item = {
+  state.playlist.items.push({
     key,
     title: t.title,
     artist: t.artist,
     bpm: t.bpm ?? null,
-    uri: t.uri || null,
-    image: t.image ? safeImage(t.image) : "",
+    uri: t.uri,
+    image: safeImage(t.image),
     durationMs: t.durationMs || 0,
-    status: t.uri ? "ok" : "pending",
-  };
-  state.playlist.items.push(item);
-  if (!t.uri) queueResolve(item);
+  });
   renderPlaylist();
   saveDraft();
   return true;
@@ -284,31 +318,20 @@ function updateItems(items) {
   saveDraft();
 }
 
-function statusBadge(item) {
-  if (item.status === "pending") return h("span", { class: "badge" }, "zoeken op Spotify…");
-  if (item.status === "missing") return h("span", { class: "badge warn" }, "niet gevonden op Spotify");
-  if (item.status === "error") return h("span", { class: "badge warn" }, "zoeken mislukt");
-  return null;
-}
-
 function renderPlaylist() {
   const { items } = state.playlist;
-  const list = $("pl-list");
-  list.replaceChildren(
+  $("pl-list").replaceChildren(
     ...items.map((item, i) => {
       const row = h(
         "li",
         { class: "row", draggable: "true" },
         h("span", { class: "grip", "aria-hidden": "true" }, "⋮⋮"),
         cover(item.image),
-        h("div", { class: "meta" }, h("strong", {}, item.title), h("span", {}, item.artist, statusBadge(item))),
+        h("div", { class: "meta" }, h("strong", {}, item.title), h("span", {}, item.artist)),
         h("div", { class: "bpm" }, item.bpm != null ? `${item.bpm}` : "–"),
         h(
           "div",
           { class: "tools" },
-          item.status === "error" || item.status === "missing"
-            ? h("button", { type: "button", title: "Opnieuw zoeken", "aria-label": `Zoek ${item.title} opnieuw`, onclick: () => queueResolve(item) }, "↻")
-            : null,
           h("button", { type: "button", title: "Omhoog", "aria-label": `${item.title} omhoog`, disabled: i === 0, onclick: () => updateItems(L.moveItem(items, i, i - 1)) }, "↑"),
           h("button", { type: "button", title: "Omlaag", "aria-label": `${item.title} omlaag`, disabled: i === items.length - 1, onclick: () => updateItems(L.moveItem(items, i, i + 1)) }, "↓"),
           h("button", { type: "button", title: "Verwijderen", "aria-label": `${item.title} verwijderen`, onclick: () => updateItems(items.filter((_, n) => n !== i)) }, "✕"),
@@ -334,15 +357,10 @@ function renderPlaylist() {
     }),
   );
 
-  const ok = items.filter((i) => i.status === "ok");
-  const pending = items.filter((i) => i.status === "pending").length;
-  const bad = items.filter((i) => i.status === "missing" || i.status === "error").length;
   const parts = [`${items.length} nummers`];
-  if (ok.length) parts.push(L.formatDuration(ok.reduce((s, i) => s + i.durationMs, 0)));
-  if (pending) parts.push(`${pending} nog te zoeken`);
-  if (bad) parts.push(`${bad} niet exporteerbaar`);
+  if (items.length) parts.push(L.formatDuration(items.reduce((s, i) => s + i.durationMs, 0)));
   $("pl-summary").textContent = items.length ? parts.join(" · ") : "Nog geen nummers. Voeg ze toe via de zoekresultaten of zoek er zelf een.";
-  if (state.results.length) renderResults(state.resultsCountry);
+  if (state.results.length) renderResults();
 }
 
 // ---------- handmatig toevoegen ----------
@@ -395,20 +413,13 @@ function showExport(kind, content, ...extra) {
 const redirectUri = () => location.origin + location.pathname;
 
 async function onExport() {
-  const { items } = state.playlist;
-  const ok = items.filter((i) => i.status === "ok" && i.uri);
+  const items = state.playlist.items;
   if (!CONFIG.SPOTIFY_CLIENT_ID || CONFIG.SPOTIFY_CLIENT_ID.startsWith("VUL_")) {
     return showExport("error", "Het Spotify Client ID is nog niet ingesteld in public/js/config.js.");
   }
-  if (items.some((i) => i.status === "pending")) {
-    return showExport("error", "Even geduld: sommige nummers worden nog op Spotify gezocht.");
-  }
-  if (!ok.length) return showExport("error", "Er zijn nog geen exporteerbare nummers in de lijst.");
+  if (!items.length) return showExport("error", "Er zijn nog geen nummers in de lijst.");
   try {
-    sessionStorage.setItem(
-      PENDING_KEY,
-      JSON.stringify({ name: state.playlist.name, uris: ok.map((i) => i.uri), skipped: items.length - ok.length }),
-    );
+    sessionStorage.setItem(PENDING_KEY, JSON.stringify({ name: state.playlist.name, uris: items.map((i) => i.uri) }));
     showExport("", "Je gaat naar Spotify om toestemming te geven…");
     await S.startLogin(CONFIG.SPOTIFY_CLIENT_ID, redirectUri());
   } catch (err) {
@@ -435,14 +446,13 @@ async function finishExportIfReturning() {
       `Klaar: ${res.count} nummers staan in je nieuwe (private) playlist. `,
       safeLink ? h("a", { href: safeLink, target: "_blank", rel: "noopener" }, "Open in Spotify") : null,
     );
-    if (pending.skipped) $("export-result").append(h("p", { class: "muted small" }, `${pending.skipped} nummers zonder Spotify-match zijn overgeslagen.`));
   } catch (err) {
     showExport("error", err.message);
   }
 }
 
 function downloadCsv() {
-  const items = state.playlist.items.filter((i) => i.status === "ok");
+  const items = state.playlist.items;
   if (!items.length) return showExport("error", "Er zijn nog geen nummers om te downloaden.");
   const blob = new Blob(["﻿" + L.toCsv(items)], { type: "text/csv;charset=utf-8" });
   const a = h("a", { href: URL.createObjectURL(blob), download: (state.playlist.name || "playlist").replace(/[^\w\- ]+/g, "").trim() + ".csv" });
@@ -460,6 +470,7 @@ function init() {
   $("manual-form").addEventListener("submit", onManualSearch);
   $("export-btn").addEventListener("click", onExport);
   $("csv-btn").addEventListener("click", downloadCsv);
+  $("more-btn").addEventListener("click", () => continueScan(MORE_GOAL));
   $("pl-name").addEventListener("input", (e) => {
     state.playlist.name = e.target.value.slice(0, 100);
     saveDraft();
@@ -469,8 +480,7 @@ function init() {
     e.target.value = "";
   });
   $("add-top").addEventListener("click", () => {
-    for (const c of state.results.slice(0, 25)) addToPlaylist({ title: c.title, artist: c.artist, bpm: c.bpm });
-    renderResults(state.resultsCountry);
+    for (const c of state.results.slice(0, 25)) addCandidate(c);
   });
   $("clear-btn").addEventListener("click", () => {
     if (state.playlist.items.length && confirm("Alle nummers uit de lijst verwijderen?")) updateItems([]);

@@ -60,14 +60,15 @@
           <select id="country"></select>
         </label>
         <label class="check">
-          <input id="strict" type="checkbox">
-          Alleen artiesten uit dit land of lokaal populair
+          <input id="abroad" type="checkbox">
+          Ook nummers tonen die niet in mijn land populair zijn
         </label>
         <button type="submit" id="search-btn" class="primary">Zoek nummers</button>
       </form>
       <p id="status" role="status" aria-live="polite"></p>
       <div id="results-head" hidden>
         <button type="button" id="add-top" class="ghost">Voeg de eerste 25 toe</button>
+        <button type="button" id="more-btn" class="ghost" hidden>Meer zoeken</button>
       </div>
       <ul id="results" class="list"></ul>
     </section>
@@ -113,8 +114,8 @@
 
   <footer>
     <p>
-      BPM-gegevens van <a href="https://getsongbpm.com" target="_blank" rel="noopener">GetSongBPM.com</a> ·
-      Lokale populariteit via <a href="https://www.last.fm" target="_blank" rel="noopener">Last.fm</a> ·
+      Tempo (BPM) via <a href="https://reccobeats.com" target="_blank" rel="noopener">ReccoBeats</a> ·
+      Populaire nummers per land en genre via <a href="https://www.last.fm" target="_blank" rel="noopener">Last.fm</a> ·
       Nummers en export via Spotify. Deze site heeft geen accounts en slaat niets van je op op een server.
     </p>
   </footer>

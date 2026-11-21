@@ -115,7 +115,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .badge.warn { color: var(--bad); border-color: var(--bad); }
 .tools { display: flex; gap: 4px; }
 .tools button { padding: 4px 9px; }
-#results .row { grid-template-columns: 1fr auto auto; }
+#results .row { grid-template-columns: 44px 1fr auto auto; }
 #manual-results .row { grid-template-columns: 44px 1fr auto; }
 
 .msg { margin-top: 14px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--line); }
