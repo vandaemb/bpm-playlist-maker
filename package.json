@@ -1,0 +1,10 @@
+{
+  "name": "bpm-playlist-maker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/run.mjs",
+    "dev": "wrangler pages dev public",
+    "deploy": "wrangler pages deploy public"
+  }
+}

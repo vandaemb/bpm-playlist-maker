@@ -1,0 +1,5 @@
+# Kopieer naar .dev.vars voor lokaal testen (staat in .gitignore). NOOIT committen.
+GETSONGBPM_KEY=
+LASTFM_KEY=
+SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BPM Playlist Maker</title>
+  <meta name="description" content="Maak een Spotify-playlist op basis van BPM, genre en jouw land.">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <h1>BPM Playlist Maker</h1>
+    <p>Kies een tempo, een genre en jouw land. Stel de playlist samen en exporteer ze met één klik naar Spotify.</p>
+  </header>
+
+  <main>
+    <section class="panel tutorial" aria-labelledby="h-help">
+      <details open>
+        <summary id="h-help">Hoe zet ik mijn playlist in Spotify?</summary>
+        <ol>
+          <li><strong>Zoek nummers.</strong> Vul je BPM, eventueel een genre en je land in en klik op <em>Zoek nummers</em>.</li>
+          <li><strong>Bouw je lijst.</strong> Klik op <em>Toevoegen</em> bij de nummers die je wilt (of <em>Voeg de eerste 25 toe</em>). Pas daarna de volgorde aan door te slepen of te sorteren, en voeg zelf nummers toe via <em>Zoek op Spotify</em>.</li>
+          <li><strong>Geef de playlist een naam</strong> bij <em>Jouw playlist</em>.</li>
+          <li><strong>Klik op <em>Exporteer naar Spotify</em>.</strong> Je gaat naar Spotify. Log in en klik op <em>Akkoord</em> zodat de site één playlist mag aanmaken. Je wachtwoord blijft bij Spotify.</li>
+          <li><strong>Klaar.</strong> Je komt terug op deze site met de knop <em>Open in Spotify</em>. De playlist staat nu ook in <em>Jouw bibliotheek</em> in Spotify en is privé tot je hem zelf deelt.</li>
+        </ol>
+        <p class="small muted"><strong>Foutmelding of geen toegang (403)?</strong> Deze site mag alleen exporteren voor personen die de beheerder bij Spotify heeft toegevoegd. Vraag de beheerder om je Spotify-e-mailadres toe te voegen.</p>
+        <p class="small muted"><strong>Geen toegang tot de export?</strong> Klik op <em>Download als CSV</em>. Open het bestand, klik op de Spotify-link van een nummer, kies in Spotify <em>•••</em> → <em>Toevoegen aan afspeellijst</em> en kies of maak je playlist.</p>
+      </details>
+    </section>
+
+    <section class="panel" aria-labelledby="h-find">
+      <h2 id="h-find">1. Nummers zoeken</h2>
+      <form id="search-form" class="grid" novalidate>
+        <label>BPM
+          <input id="bpm" type="number" min="40" max="220" value="120" inputmode="numeric" required>
+        </label>
+        <label>Marge
+          <select id="tol">
+            <option value="0">exact</option>
+            <option value="1">± 1</option>
+            <option value="2" selected>± 2</option>
+            <option value="3">± 3</option>
+            <option value="5">± 5</option>
+          </select>
+        </label>
+        <label>Genre <span class="opt">(optioneel)</span>
+          <input id="genre" type="text" list="genres" maxlength="40" placeholder="bv. dance, pop, hip hop" autocomplete="off">
+          <datalist id="genres">
+            <option value="pop"><option value="rock"><option value="dance"><option value="electronic">
+            <option value="house"><option value="techno"><option value="hip hop"><option value="r&b">
+            <option value="soul"><option value="funk"><option value="disco"><option value="jazz">
+            <option value="reggae"><option value="latin"><option value="indie"><option value="metal">
+            <option value="country"><option value="punk"><option value="folk"><option value="blues">
+          </datalist>
+        </label>
+        <label>Jouw land
+          <select id="country"></select>
+        </label>
+        <label class="check">
+          <input id="strict" type="checkbox">
+          Alleen artiesten uit dit land of lokaal populair
+        </label>
+        <button type="submit" id="search-btn" class="primary">Zoek nummers</button>
+      </form>
+      <p id="status" role="status" aria-live="polite"></p>
+      <div id="results-head" hidden>
+        <button type="button" id="add-top" class="ghost">Voeg de eerste 25 toe</button>
+      </div>
+      <ul id="results" class="list"></ul>
+    </section>
+
+    <section class="panel" aria-labelledby="h-list">
+      <h2 id="h-list">2. Jouw playlist</h2>
+      <div class="grid">
+        <label>Naam
+          <input id="pl-name" type="text" maxlength="100" value="Mijn BPM-playlist">
+        </label>
+        <label>Sorteren
+          <select id="sort">
+            <option value="">Kies een volgorde…</option>
+            <option value="bpm-asc">BPM laag → hoog</option>
+            <option value="bpm-desc">BPM hoog → laag</option>
+            <option value="title">Titel A → Z</option>
+            <option value="title-desc">Titel Z → A</option>
+            <option value="artist">Artiest A → Z</option>
+            <option value="shuffle">Willekeurig</option>
+          </select>
+        </label>
+      </div>
+      <p id="pl-summary" class="muted"></p>
+      <ol id="pl-list" class="list"></ol>
+      <p class="muted small">Sleep een nummer om de volgorde te wijzigen, of gebruik de pijltjes.</p>
+
+      <form id="manual-form" class="inline">
+        <label class="grow">Zelf een nummer toevoegen
+          <input id="manual-q" type="search" maxlength="100" placeholder="Titel en/of artiest" autocomplete="off">
+        </label>
+        <button type="submit" class="ghost">Zoek op Spotify</button>
+      </form>
+      <ul id="manual-results" class="list"></ul>
+
+      <div class="actions">
+        <button type="button" id="export-btn" class="primary">Exporteer naar Spotify</button>
+        <button type="button" id="csv-btn" class="ghost">Download als CSV</button>
+        <button type="button" id="clear-btn" class="ghost danger">Lijst leegmaken</button>
+      </div>
+      <div id="export-result" role="status" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      BPM-gegevens van <a href="https://getsongbpm.com" target="_blank" rel="noopener">GetSongBPM.com</a> ·
+      Lokale populariteit via <a href="https://www.last.fm" target="_blank" rel="noopener">Last.fm</a> ·
+      Nummers en export via Spotify. Deze site heeft geen accounts en slaat niets van je op op een server.
+    </p>
+  </footer>
+</body>
+</html>
