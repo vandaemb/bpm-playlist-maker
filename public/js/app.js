@@ -311,9 +311,9 @@ async function continueScan(extra) {
 
   const exhausted = scan.index >= scan.candidates.length;
   if (scan.paused) {
-    return setStatus(`Gepauzeerd: de tempo-dienst (ReccoBeats) blijft fouten geven (${scan.paused}). ${scan.found.length} nummers gevonden tot nu toe. Wacht een paar minuten en klik op "Meer zoeken" om verder te gaan (reeds gecontroleerde nummers worden onthouden).`, "error");
+    return setStatus(`Gepauzeerd: de tempo-dienst (ReccoBeats) blijft fouten geven (${scan.paused}). ${scan.found.length} nummers gevonden tot nu toe. Wacht een paar minuten en klik op "Meer zoeken" om verder te gaan (reeds gecontroleerde nummers worden onthouden). · ${breakdown(scan)}`, "error");
   }
-  if (scan.stopped) return setStatus(`Gestopt · ${scan.found.length} nummers gevonden · ${scan.index} van ${scan.candidates.length} gecontroleerd. Klik op "Meer zoeken" om verder te gaan.`);
+  if (scan.stopped) return setStatus(`Gestopt · ${scan.found.length} nummers gevonden · ${scan.index} van ${scan.candidates.length} gecontroleerd. Klik op "Meer zoeken" om verder te gaan. · ${breakdown(scan)}`);
   const parts = [`${scan.found.length} nummers gevonden`];
   parts.push(exhausted ? "alle kandidaten zijn gecontroleerd" : `${scan.index} van ${scan.candidates.length} gecontroleerd, klik op "Meer zoeken" voor meer`);
   if (!scan.found.length && exhausted) parts.push("probeer een grotere marge, een breder jaarbereik of een ander genre");
