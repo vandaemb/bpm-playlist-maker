@@ -16,7 +16,13 @@ const MAX_IDS = 20;
 
 class BadRequest extends Error {}
 class Misconfigured extends Error {}
-class Upstream extends Error {}
+class Upstream extends Error {
+  constructor(status, label = "") {
+    super(String(status));
+    this.status = String(status);
+    this.label = label;
+  }
+}
 
 function json(data, status = 200, extra = {}) {
   return new Response(JSON.stringify(data), {
@@ -30,9 +36,14 @@ function need(env, name) {
   return env[name];
 }
 
-async function upstreamFetch(url, init = {}) {
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
-  if (!res.ok) throw new Upstream(String(res.status));
+async function upstreamFetch(url, init = {}, label = "") {
+  let res;
+  try {
+    res = await fetch(url, { ...init, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
+  } catch {
+    throw new Upstream("geen antwoord", label);
+  }
+  if (!res.ok) throw new Upstream(res.status, label);
   return res;
 }
 
@@ -46,7 +57,7 @@ async function getSpotifyToken(env) {
     method: "POST",
     headers: { Authorization: `Basic ${basic}`, "content-type": "application/x-www-form-urlencoded" },
     body: "grant_type=client_credentials",
-  });
+  }, "Spotify-aanmelding");
   const data = await res.json();
   spotifyToken = { value: data.access_token, expires: Date.now() + (Number(data.expires_in) || 3600) * 1000 };
   return spotifyToken.value;
@@ -82,7 +93,7 @@ async function lastfmTracks(method, extra, env) {
     api_key: need(env, "LASTFM_KEY"),
     format: "json",
   })}`;
-  const d = await (await upstreamFetch(url)).json();
+  const d = await (await upstreamFetch(url, {}, "Last.fm")).json();
   const list = Array.isArray(d?.tracks?.track) ? d.tracks.track : [];
   const tracks = list
     .map((t) => ({ name: String(t?.name ?? ""), artist: String(t?.artist?.name ?? "") }))
@@ -105,7 +116,7 @@ async function tempoFor(ids, waitUntil) {
   if (missing.length) {
     const res = await upstreamFetch(`${RECCO}/audio-features?${new URLSearchParams({ ids: missing.join(",") })}`, {
       headers: { accept: "application/json" },
-    });
+    }, "ReccoBeats");
     const body = await res.json();
     const list = Array.isArray(body) ? body : Array.isArray(body?.content) ? body.content : [];
     const found = {};
@@ -169,7 +180,7 @@ const handlers = {
     const token = await getSpotifyToken(env);
     const res = await upstreamFetch(`${SPOTIFY_API}/search?${new URLSearchParams({ q, type: "track", limit: "5" })}`, {
       headers: { Authorization: `Bearer ${token}` },
-    });
+    }, "Spotify-zoeken");
     const d = await res.json();
     const items = Array.isArray(d?.tracks?.items) ? d.tracks.items : [];
     const tracks = items
@@ -223,8 +234,9 @@ export async function onRequestGet(context) {
     if (err instanceof BadRequest) return json({ error: err.message }, 400);
     if (err instanceof Misconfigured) return json({ error: `Server niet geconfigureerd: ${err.message} ontbreekt.` }, 500);
     if (err instanceof Upstream) {
-      const rate = err.message === "429" ? " (limiet bereikt, probeer het later opnieuw)" : "";
-      return json({ error: `De externe muziekdienst gaf een fout${rate}.` }, 502);
+      const rate = err.status === "429" ? " (limiet bereikt, probeer het later opnieuw)" : "";
+      const who = err.label ? ` (${err.label}, HTTP ${err.status})` : "";
+      return json({ error: `De externe muziekdienst gaf een fout${who}${rate}.` }, 502);
     }
     return json({ error: "Onverwachte serverfout." }, 500);
   }
