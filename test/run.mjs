@@ -142,6 +142,16 @@ globalThis.fetch = async (url, init = {}) => {
     const method = new URL(u).searchParams.get("method");
     return ok({ tracks: { track: [{ name: method, artist: { name: "R" } }, { bad: true }] } });
   }
+  if (u.startsWith("https://api.deezer.com/search")) {
+    const q = new URL(u).searchParams.get("q");
+    if (q.includes("Boom")) return new Response("{}", { status: 500 });
+    if (q.includes("Known")) return ok({ data: [{ id: 77, title: "Known Song", artist: { name: "Some Artist" } }] });
+    if (q.includes("Zero")) return ok({ data: [{ id: 78, title: "Zero Song", artist: { name: "Some Artist" } }] });
+    if (q.includes("Cover")) return ok({ data: [{ id: 79, title: "Cover Song", artist: { name: "Other Band" } }] });
+    return ok({ data: [] });
+  }
+  if (u === "https://api.deezer.com/track/77") return ok({ id: 77, bpm: 128.4 });
+  if (u === "https://api.deezer.com/track/78") return ok({ id: 78, bpm: 0 });
   return new Response("{}", { status: 500 });
 };
 
@@ -172,6 +182,43 @@ await test("proxy: tempo cachet per ID en vraagt alleen ontbrekende ID's op", as
   const n2 = calls.length;
   await run(`/api/tempo?ids=${ID1},${ID2},${ID3},${UNK}`);
   assert.equal(calls.length, n2, "alles uit de cache, ook het onbekende ID");
+});
+
+const q = (id, artist, title) => `ids=${id}&a=${encodeURIComponent(artist)}&t=${encodeURIComponent(title)}`;
+const Z1 = "z1".repeat(11), Z2 = "z2".repeat(11), Z3 = "z3".repeat(11), Z4 = "z4".repeat(11), Z5 = "z5".repeat(11);
+
+await test("proxy: Deezer vult aan als ReccoBeats een nummer niet kent; 0-BPM en andere artiest tellen niet", async () => {
+  const ids = [Z1, Z2, Z3];
+  const names = `ids=${ids.join(",")}&a=Some%20Artist&a=Some%20Artist&a=Other%20Band&t=Known%20Song&t=Zero%20Song&t=Cover%20Song`;
+  const { res, body } = await run(`/api/tempo?${names}`);
+  assert.equal(res.status, 200);
+  assert.equal(body.tempos[Z1], 128.4);
+  assert.equal(body.tempos[Z2], null, "Deezer-BPM 0 = onbekend");
+  const n = calls.length;
+  await run(`/api/tempo?${q(Z1, "Some Artist", "Known Song")}`);
+  assert.equal(calls.length, n, "Deezer-resultaat is gecachet");
+});
+
+await test("proxy: verkeerde artiest bij Deezer wordt genegeerd", async () => {
+  const { body } = await run(`/api/tempo?${q(Z4, "Totally Different", "Cover Song")}`);
+  assert.equal(body.tempos[Z4], null);
+});
+
+await test("proxy: ReccoBeats faalt (429) maar Deezer weet het: geen fout; Deezer faalt ook: fout", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => (String(url).startsWith("https://api.reccobeats.com") ? new Response("{}", { status: 429 }) : realFetch(url, init));
+  const ok = await run(`/api/tempo?${q(Z5, "Some Artist", "Known Song")}`);
+  const bad = await run(`/api/tempo?${q("z6".repeat(11), "Some Artist", "Boom")}`);
+  const noNames = await run(`/api/tempo?ids=${"z7".repeat(11)}`);
+  globalThis.fetch = realFetch;
+  assert.equal(ok.res.status, 200);
+  assert.equal(ok.body.tempos[Z5], 128.4);
+  assert.equal(bad.res.status, 502);
+  assert.equal(noNames.res.status, 502);
+});
+
+await test("proxy: namen moeten even lang zijn als de ID's", async () => {
+  assert.equal((await run(`/api/tempo?ids=${ID1},${ID2}&a=X&t=Y`)).res.status, 400);
 });
 
 await test("proxy: invoer wordt gevalideerd", async () => {

@@ -81,7 +81,70 @@ async function lastfmTracks(method, extra, env) {
 // ---- Tempo (ReccoBeats): per Spotify-ID gecachet, zodat herhaalde zoekopdrachten niets kosten. ----
 const tempoKey = (id) => new Request(`https://cache.internal/tempo/${id}`);
 
-async function tempoFor(ids, waitUntil) {
+// ---- Deezer: reserve voor nummers waarvoor ReccoBeats niets (of niets bruikbaars) geeft. ----
+const DEEZER = "https://api.deezer.com";
+const MAX_NAME = 120;
+const DEEZER_CONCURRENCY = 4;
+
+function normName(s) {
+  return String(s ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\(.*?\)|\[.*?\]/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+async function deezerJson(url) {
+  const res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
+  if (!res.ok) throw new Upstream(res.status, "Deezer");
+  const body = await res.json();
+  if (body?.error) throw new Upstream("fout", "Deezer");
+  return body;
+}
+
+/** { ok:false } = Deezer gaf een fout (niets afleiden); { ok:true, tempo } = antwoord (tempo kan null zijn). */
+async function deezerTempo(artist, title) {
+  try {
+    const wa = normName(artist);
+    const wt = normName(title);
+    if (!wa || !wt) return { ok: true, tempo: null };
+    const found = await deezerJson(`${DEEZER}/search?${new URLSearchParams({ q: `${artist} ${title}`.slice(0, 150), limit: "5" })}`);
+    const hit = (Array.isArray(found?.data) ? found.data : []).find((t) => {
+      const ta = normName(t?.title);
+      const aa = normName(t?.artist?.name);
+      return aa && (ta === wt || ta.startsWith(wt) || wt.startsWith(ta)) && (wa.includes(aa) || aa.includes(wa));
+    });
+    if (!hit || !Number.isInteger(hit.id)) return { ok: true, tempo: null };
+    const bpm = Number((await deezerJson(`${DEEZER}/track/${hit.id}`))?.bpm);
+    return { ok: true, tempo: Number.isFinite(bpm) && bpm > 0 ? bpm : null };
+  } catch {
+    return { ok: false };
+  }
+}
+
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const i = next++;
+        out[i] = await fn(items[i]);
+      }
+    }),
+  );
+  return out;
+}
+
+const DAY = 86400;
+
+/**
+ * Tempo per Spotify-ID: eerst de cache, dan ReccoBeats (één aanvraag voor alles), en voor wat daar
+ * ontbreekt (of als ReccoBeats faalt) Deezer op artiest + titel. `names` = { id: {artist, title} }.
+ */
+async function tempoFor(ids, names, waitUntil) {
   const cache = typeof caches !== "undefined" ? caches.default : null;
   const tempos = {};
   const missing = [];
@@ -90,27 +153,63 @@ async function tempoFor(ids, waitUntil) {
     if (hit) tempos[id] = (await hit.json()).tempo;
     else missing.push(id);
   }
-  if (missing.length) {
+  if (!missing.length) return tempos;
+
+  const store = (id, tempo, ttl) => {
+    if (cache) waitUntil(cache.put(tempoKey(id), new Response(JSON.stringify({ tempo }), { headers: { "cache-control": `public, max-age=${ttl}` } })));
+  };
+
+  // 1. ReccoBeats
+  const found = {};
+  let reccoError = null;
+  try {
     const res = await upstreamFetch(`${RECCO}/audio-features?${new URLSearchParams({ ids: missing.join(",") })}`, {
       headers: { accept: "application/json" },
     }, "ReccoBeats");
     const body = await res.json();
     const list = Array.isArray(body) ? body : Array.isArray(body?.content) ? body.content : [];
-    const found = {};
     for (const f of list) {
       const m = /track\/([A-Za-z0-9]{22})/.exec(String(f?.href ?? ""));
       const t = Number(f?.tempo);
       if (m && Number.isFinite(t)) found[m[1]] = t;
     }
-    for (const id of missing) {
-      const tempo = Object.hasOwn(found, id) ? found[id] : null;
-      tempos[id] = tempo;
-      if (cache) {
-        const ttl = tempo === null ? 86400 : 7 * 86400;
-        waitUntil(cache.put(tempoKey(id), new Response(JSON.stringify({ tempo }), { headers: { "cache-control": `public, max-age=${ttl}` } })));
+  } catch (err) {
+    if (!(err instanceof Upstream)) throw err;
+    reccoError = err;
+  }
+
+  // 2. Deezer voor de rest (alleen als we namen kennen)
+  const rest = missing.filter((id) => !Object.hasOwn(found, id) && names[id]);
+  const deezer = {};
+  const answers = await mapLimit(rest, DEEZER_CONCURRENCY, (id) => deezerTempo(names[id].artist, names[id].title));
+  rest.forEach((id, i) => (deezer[id] = answers[i]));
+
+  let inconclusive = false;
+  for (const id of missing) {
+    if (Object.hasOwn(found, id)) {
+      tempos[id] = found[id];
+      store(id, found[id], 7 * DAY);
+    } else if (deezer[id]?.ok && deezer[id].tempo != null) {
+      tempos[id] = deezer[id].tempo;
+      store(id, deezer[id].tempo, 7 * DAY);
+    } else if (deezer[id] && !deezer[id].ok) {
+      inconclusive = true; // Deezer-fout: niets onthouden
+      tempos[id] = null;
+    } else if (reccoError) {
+      if (names[id] && deezer[id]?.ok) {
+        tempos[id] = null; // ReccoBeats faalde, Deezer weet het niet: later opnieuw proberen
+        store(id, null, 3600);
+      } else {
+        inconclusive = true;
+        tempos[id] = null;
       }
+    } else {
+      tempos[id] = null; // ReccoBeats antwoordde zonder tempo (en Deezer ook niet, of geen naam)
+      store(id, null, DAY);
     }
   }
+  // ReccoBeats faalde en we konden niet alles zeker bepalen: de browser moet later opnieuw proberen.
+  if (reccoError && inconclusive) throw reccoError;
   return tempos;
 }
 
@@ -121,7 +220,20 @@ const handlers = {
     if (!ids.length || ids.length > MAX_IDS || !ids.every((i) => SPOTIFY_ID.test(i))) {
       throw new BadRequest("Ongeldige parameter: ids");
     }
-    return { ttl: 0, data: { tempos: await tempoFor([...new Set(ids)], waitUntil) } };
+    // Optionele namen (parallel aan ids), voor de Deezer-reserve.
+    const artists = params.getAll("a");
+    const titles = params.getAll("t");
+    const names = {};
+    if (artists.length || titles.length) {
+      const ok = (v) => v.length <= MAX_NAME && !/[\u0000-\u001f\u007f]/.test(v);
+      if (artists.length !== ids.length || titles.length !== ids.length || !artists.every(ok) || !titles.every(ok)) {
+        throw new BadRequest("Ongeldige parameter: a/t");
+      }
+      ids.forEach((id, i) => {
+        if (!names[id]) names[id] = { artist: artists[i], title: titles[i] };
+      });
+    }
+    return { ttl: 0, data: { tempos: await tempoFor([...new Set(ids)], names, waitUntil) } };
   },
 
   async lastfm(params, env) {
@@ -138,45 +250,13 @@ const handlers = {
     return lastfmTracks("tag.gettoptracks", { tag, page: String(page) }, env);
   },
 
-  // Tijdelijke diagnose: toont of Deezer en ReccoBeats vanaf Cloudflare bereikbaar zijn en een BPM geven.
-  async diag() {
-    const probe = async (url) => {
-      try {
-        const res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
-        let body = null;
-        try {
-          body = await res.json();
-        } catch {}
-        return { status: res.status, body };
-      } catch {
-        return { status: "geen antwoord", body: null };
-      }
-    };
-    const out = {};
-    const queries = ["daft punk one more time", "the weeknd blinding lights", "abba dancing queen", "dua lipa levitating", "stromae alors on danse", "avicii levels", "queen don't stop me now", "pharrell happy"];
-    const rows = await Promise.all(
-      queries.map(async (q) => {
-        const search = await probe("https://api.deezer.com/search?q=" + encodeURIComponent(q) + "&limit=1");
-        const first = search.body?.data?.[0];
-        if (!first) return { q, search: search.status, hit: false };
-        const track = await probe(`https://api.deezer.com/track/${Number(first.id)}`);
-        return { q, search: search.status, track: track.status, bpm: track.body?.bpm ?? null };
-      }),
-    );
-    out.deezer = rows;
-    const recco = await probe(`${RECCO}/audio-features?ids=0VjIjW4GlUZAMYd2vXMi3b`);
-    out.reccobeats = recco.status;
-    out.reccobeats_tempo = recco.body?.content?.[0]?.tempo ?? null;
-    return { ttl: 0, data: out };
-  },
-
   async chart(params, env) {
     const page = intParam(params, "page", 1, 3);
     return lastfmTracks("chart.gettoptracks", { page: String(page) }, env);
   },
 };
 
-const NO_URL_CACHE = new Set(["tempo", "diag"]);
+const NO_URL_CACHE = new Set(["tempo"]);
 
 // Blokkeert andere websites die jouw proxy (en dus jouw API-quota) willen meebenutten.
 // Browsers sturen Sec-Fetch-Site mee en dat kan een pagina niet vervalsen.

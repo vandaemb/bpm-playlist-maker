@@ -43,7 +43,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ---------- netwerk ----------
 async function api(path, params = {}) {
   const url = new URL(path, location.origin);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
+  for (const [k, v] of Object.entries(params)) {
+    if (Array.isArray(v)) for (const x of v) url.searchParams.append(k, String(x));
+    else url.searchParams.set(k, String(v));
+  }
   const res = await fetch(url, { headers: { accept: "application/json" } });
   if (!res.ok) {
     let msg = "";
@@ -148,12 +151,24 @@ async function fetchLastfm(path, params, pages) {
   return settled.filter((r) => r.status === "fulfilled").flatMap((r) => r.value.tracks || []);
 }
 
+function uniqueTempoItems(matched) {
+  const seen = new Set();
+  const out = [];
+  for (const m of matched) {
+    if (seen.has(m.spotifyId)) continue;
+    seen.add(m.spotifyId);
+    out.push({ id: m.spotifyId, artist: m.best.artists[0] || m.c.artist, title: m.best.name });
+  }
+  return out;
+}
+
 // Tempo opvragen met geduld: bij "limiet bereikt" (429) of een tijdelijke fout wachten we steeds langer.
 const TEMPO_WAITS = [3, 8, 20, 45]; // seconden tussen de pogingen
-async function fetchTempos(ids, onWait) {
+async function fetchTempos(items, onWait) {
+  const ids = items.map((i) => i.id);
   for (let attempt = 0; ; attempt++) {
     try {
-      return (await api("/api/tempo", { ids: ids.join(",") })).tempos || {};
+      return (await api("/api/tempo", { ids: ids.join(","), a: items.map((i) => i.artist), t: items.map((i) => i.title) })).tempos || {};
     } catch (err) {
       if (attempt >= TEMPO_WAITS.length) throw err;
       const secs = TEMPO_WAITS[attempt];
@@ -236,9 +251,9 @@ async function continueScan(extra) {
 
       let tempos = {};
       try {
-        tempos = await fetchTempos([...new Set(inYears.map((m) => m.spotifyId))], (left, limited) => {
+        tempos = await fetchTempos(uniqueTempoItems(inYears), (left, limited) => {
           if (scan.id === state.scanId) {
-            setStatus(`${limited ? "De tempo-dienst (ReccoBeats) zegt: te veel aanvragen." : "De tempo-dienst reageert niet."} Nieuwe poging over ${left} s… · ${scan.found.length} gevonden`);
+            setStatus(`${limited ? "Een tempo-dienst zegt: te veel aanvragen." : "De tempo-dienst reageert niet."} Nieuwe poging over ${left} s… · ${scan.found.length} gevonden`);
           }
         });
       } catch (err) {
