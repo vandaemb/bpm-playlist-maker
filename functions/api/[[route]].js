@@ -138,13 +138,45 @@ const handlers = {
     return lastfmTracks("tag.gettoptracks", { tag, page: String(page) }, env);
   },
 
+  // Tijdelijke diagnose: toont of Deezer en ReccoBeats vanaf Cloudflare bereikbaar zijn en een BPM geven.
+  async diag() {
+    const probe = async (url) => {
+      try {
+        const res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
+        let body = null;
+        try {
+          body = await res.json();
+        } catch {}
+        return { status: res.status, body };
+      } catch {
+        return { status: "geen antwoord", body: null };
+      }
+    };
+    const out = {};
+    const search = await probe("https://api.deezer.com/search?q=" + encodeURIComponent('artist:"daft punk" track:"one more time"') + "&limit=1");
+    const id = search.body?.data?.[0]?.id;
+    out.deezer_search = search.status;
+    if (id) {
+      const track = await probe(`https://api.deezer.com/track/${Number(id)}`);
+      out.deezer_track = track.status;
+      out.deezer_bpm = track.body?.bpm ?? null;
+    }
+    const isrc = await probe("https://api.deezer.com/track/isrc:GBDUW0000059");
+    out.deezer_isrc = isrc.status;
+    out.deezer_isrc_bpm = isrc.body?.bpm ?? null;
+    const recco = await probe(`${RECCO}/audio-features?ids=0VjIjW4GlUZAMYd2vXMi3b`);
+    out.reccobeats = recco.status;
+    out.reccobeats_tempo = recco.body?.content?.[0]?.tempo ?? null;
+    return { ttl: 0, data: out };
+  },
+
   async chart(params, env) {
     const page = intParam(params, "page", 1, 3);
     return lastfmTracks("chart.gettoptracks", { page: String(page) }, env);
   },
 };
 
-const NO_URL_CACHE = new Set(["tempo"]);
+const NO_URL_CACHE = new Set(["tempo", "diag"]);
 
 // Blokkeert andere websites die jouw proxy (en dus jouw API-quota) willen meebenutten.
 // Browsers sturen Sec-Fetch-Site mee en dat kan een pagina niet vervalsen.
