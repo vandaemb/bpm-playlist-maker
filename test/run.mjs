@@ -76,6 +76,19 @@ await test("pickBestMatch kiest het juiste nummer en weigert verkeerde artiest",
   assert.equal(L.pickBestMatch([{ uri: "spotify:track:short", name: "X", artists: ["Y"] }], { title: "X", artist: "Y" }), null);
 });
 
+await test("buildSearchQuery en mapSpotifyTracks", () => {
+  assert.equal(L.buildSearchQuery({ title: 'Song (Live) "x"', artist: "A: B" }), "track:Song x artist:A B");
+  assert.equal(L.buildSearchQuery({ title: "", artist: "A" }), "");
+  assert.equal(L.buildSearchQuery({ q: "  hello   world " }), "hello world");
+  assert.equal(L.buildSearchQuery({ q: "x".repeat(300) }).length, 100);
+  const mapped = L.mapSpotifyTracks({ tracks: { items: [
+    { uri: uri("a"), name: "N", artists: [{ name: "R" }], album: { name: "Al", images: [{ url: "u1" }, { url: "u2" }] }, duration_ms: 5 },
+    { uri: "spotify:track:bad", name: "X" }, null,
+  ] } });
+  assert.deepEqual(mapped, [{ uri: uri("a"), name: "N", artists: ["R"], album: "Al", image: "u2", durationMs: 5 }]);
+  assert.deepEqual(L.mapSpotifyTracks(null), []);
+});
+
 await test("spotifyIdFromUri", () => {
   assert.equal(L.spotifyIdFromUri(uri("a")), "a".repeat(22));
   assert.equal(L.spotifyIdFromUri("spotify:track:../x"), "");
@@ -135,7 +148,6 @@ globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
   calls.push({ url: u, init });
   const ok = (body) => new Response(JSON.stringify(body), { status: 200 });
-  if (u.startsWith("https://accounts.spotify.com/api/token")) return ok({ access_token: "APPTOKEN", expires_in: 3600 });
   if (u.startsWith("https://api.reccobeats.com/v1/audio-features")) {
     const ids = new URL(u).searchParams.get("ids").split(",");
     // ID's die met 'z' beginnen kent ReccoBeats niet.
@@ -145,13 +157,10 @@ globalThis.fetch = async (url, init = {}) => {
     const method = new URL(u).searchParams.get("method");
     return ok({ tracks: { track: [{ name: method, artist: { name: "R" } }, { bad: true }] } });
   }
-  if (u.startsWith("https://api.spotify.com/v1/search")) {
-    return ok({ tracks: { items: [{ uri: uri("a"), name: "N", artists: [{ name: "R" }], album: { name: "Al", images: [{ url: "https://i.scdn.co/1" }, { url: "https://i.scdn.co/2" }] }, duration_ms: 1000 }] } });
-  }
   return new Response("{}", { status: 500 });
 };
 
-const env = { LASTFM_KEY: "KEY_LFM", SPOTIFY_CLIENT_ID: "cid", SPOTIFY_CLIENT_SECRET: "SECRET" };
+const env = { LASTFM_KEY: "KEY_LFM" };
 const run = async (path, { headers = {}, e = env } = {}) => {
   const pending = [];
   const res = await onRequestGet({ request: new Request("https://site.test" + path, { headers }), env: e, waitUntil: (p) => pending.push(p) });
@@ -186,10 +195,10 @@ await test("proxy: invoer wordt gevalideerd", async () => {
     "/api/tempo", "/api/tempo?ids=abc", `/api/tempo?ids=${ID1},../../x`, `/api/tempo?ids=${many}`,
     "/api/lastfm?country=Belgium&page=9", "/api/lastfm?country=%3Cscript%3E&page=1",
     "/api/lastfm-tag?tag=%3Cb%3E&page=1", "/api/lastfm-tag?tag=pop&page=0", "/api/chart?page=4",
-    "/api/search?q=" + "x".repeat(101), "/api/search?title=x",
   ];
   for (const p of bad) assert.equal((await run(p)).res.status, 400, p);
   assert.equal((await run("/api/nope")).res.status, 404);
+  assert.equal((await run("/api/search?q=abc")).res.status, 404, "Spotify gaat niet meer via de proxy");
   assert.equal((await run("/api/constructor")).res.status, 404, "geen prototype-lookup");
 });
 
@@ -199,16 +208,6 @@ await test("proxy: Last.fm-routes (land, genre, wereldtop) filteren rommel en ge
   assert.deepEqual((await run("/api/chart?page=1")).body.tracks, [{ name: "chart.gettoptracks", artist: "R" }]);
   const tagCall = calls.findLast((c) => c.url.includes("tag.gettoptracks"));
   assert.equal(new URL(tagCall.url).searchParams.get("tag"), "hip-hop");
-});
-
-await test("proxy: Spotify-search levert slank resultaat, secret lekt niet", async () => {
-  const { res, body } = await run("/api/search?title=N%20(Remastered)&artist=R");
-  assert.equal(res.status, 200);
-  assert.deepEqual(body.tracks[0], { uri: uri("a"), name: "N", artists: ["R"], album: "Al", image: "https://i.scdn.co/2", durationMs: 1000 });
-  const searchCall = calls.findLast((c) => c.url.startsWith("https://api.spotify.com/v1/search"));
-  assert.ok(searchCall.url.includes("track%3AN+artist%3AR"), searchCall.url);
-  assert.ok(!JSON.stringify(body).includes("SECRET"));
-  assert.equal(searchCall.init.headers.Authorization, "Bearer APPTOKEN");
 });
 
 await test("proxy: vreemde websites in de browser worden geweigerd", async () => {

@@ -13,7 +13,7 @@ for (const line of headersFile.split("\n").slice(1)) {
 const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css" };
 
 // Tempo per nummer (titel). Het Spotify-ID wordt afgeleid van de titel.
-const TEMPO = { "Belgian Banger": 120, "Intl Pop": 119, "Slow Song": 80, "<img src=x onerror=alert(1)>": 121, "Pop Hit": 120 };
+const TEMPO = { "Belgian Banger": 120, "Intl Pop": 119, "Slow Song": 80, "<img src=x onerror=alert1>": 121, "Pop Hit": 120 };
 const idFor = (title) => (Buffer.from(title).toString("hex") + "x".repeat(22)).slice(0, 22);
 const idToTempo = {};
 for (const [t, bpm] of Object.entries(TEMPO)) idToTempo[idFor(t)] = bpm;
@@ -22,7 +22,7 @@ const COUNTRY = [
   { name: "Belgian Banger", artist: { name: "Stromae" } },
   { name: "Intl Pop", artist: { name: "Star" } },
   { name: "Slow Song", artist: { name: "Calm" } },
-  { name: "<img src=x onerror=alert(1)>", artist: { name: "Evil" } },
+  { name: "<img src=x onerror=alert1>", artist: { name: "Evil" } },
 ];
 const TAG_POP = [
   { name: "Intl Pop", artist: { name: "Star" } },
@@ -44,12 +44,6 @@ http
     if (u.pathname === "/api/tempo") {
       const ids = (u.searchParams.get("ids") || "").split(",");
       return json(res, { tempos: Object.fromEntries(ids.map((i) => [i, idToTempo[i] ?? null])) });
-    }
-    if (u.pathname === "/api/search") {
-      const title = u.searchParams.get("title") || u.searchParams.get("q") || "x";
-      const artist = u.searchParams.get("artist") || "Manual Artist";
-      if (u.searchParams.get("title") === "Unknown Track") return json(res, { tracks: [] });
-      return json(res, { tracks: [{ uri: "spotify:track:" + idFor(title), name: title, artists: [artist], album: "Album", image: "", durationMs: 200000 }] });
     }
     const file = path.join(root, u.pathname === "/" ? "index.html" : u.pathname);
     if (!file.startsWith(root) || !fs.existsSync(file)) {

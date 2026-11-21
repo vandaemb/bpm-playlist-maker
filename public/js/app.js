@@ -4,7 +4,6 @@ import * as S from "./spotify.js";
 
 const $ = (id) => document.getElementById(id);
 const DRAFT_KEY = "bpm-playlist-draft-v1";
-const PENDING_KEY = "bpm-playlist-pending-export";
 const BATCH = 20; // kandidaten per ronde (ook max. aantal ID's per tempo-aanvraag)
 const FIRST_GOAL = 30;
 const MORE_GOAL = 25;
@@ -151,6 +150,10 @@ async function onSearch(ev) {
   if (!Number.isFinite(bpm) || bpm < L.MIN_BPM || bpm > L.MAX_BPM) {
     return setStatus(`Kies een BPM tussen ${L.MIN_BPM} en ${L.MAX_BPM}.`, "error");
   }
+  if (!S.getToken()) {
+    updateConnection();
+    return setStatus("Verbind eerst met Spotify (knop hierboven). Zonder verbinding kan de site de nummers niet op Spotify zoeken.", "error");
+  }
   const tol = Number($("tol").value);
   const genre = $("genre").value.trim().slice(0, 40);
   const country = currentCountry();
@@ -180,7 +183,7 @@ async function onSearch(ev) {
         "error",
       );
     }
-    state.scan = { id, candidates, index: 0, bpm, tol, country, found: [], keys: new Set(), running: false, failedBatches: 0 };
+    state.scan = { id, candidates, index: 0, bpm, tol, country, found: [], keys: new Set(), running: false, failedBatches: 0, searchErrors: 0 };
     await continueScan(FIRST_GOAL);
   } catch (err) {
     setStatus(`Zoeken mislukt: ${err.message}`, "error");
@@ -202,12 +205,18 @@ async function continueScan(extra) {
       scan.index += batch.length;
       setStatus(`Zoeken… ${scan.index} van ${scan.candidates.length} nummers gecontroleerd · ${scan.found.length} gevonden`);
 
-      const looked = await pool(batch, 4, async (c) => {
-        const { tracks } = await api("/api/search", { title: c.title, artist: c.artist });
+      const token = S.getToken();
+      if (!token) throw new S.SpotifyAuthError("Je Spotify-verbinding is verlopen. Verbind opnieuw met Spotify.");
+      const looked = await pool(batch, 3, async (c) => {
+        const tracks = await S.searchTracks(token, L.buildSearchQuery({ title: c.title, artist: c.artist }));
         const best = L.pickBestMatch(tracks, c);
         return best ? { c, best, spotifyId: L.spotifyIdFromUri(best.uri) } : null;
       });
       if (scan.id !== state.scanId) return;
+      // Fouten waar opnieuw proberen niets helpt (403/401) breken de zoekopdracht af met een duidelijke melding.
+      const fatal = looked.find((r) => !r.ok && r.error instanceof S.SpotifyAuthError);
+      if (fatal) throw fatal.error;
+      scan.searchErrors += looked.filter((r) => !r.ok).length;
       const matched = looked.filter((r) => r.ok && r.value).map((r) => r.value);
       if (!matched.length) continue;
 
@@ -242,7 +251,10 @@ async function continueScan(extra) {
       renderResults();
     }
   } catch (err) {
-    if (scan.id === state.scanId) setStatus(`Zoeken mislukt: ${err.message}`, "error");
+    if (scan.id === state.scanId) {
+      setStatus(`Zoeken mislukt: ${err.message}`, "error");
+      updateConnection();
+    }
     return;
   } finally {
     scan.running = false;
@@ -259,6 +271,7 @@ async function continueScan(extra) {
   parts.push(exhausted ? "alle kandidaten zijn gecontroleerd" : `${scan.index} van ${scan.candidates.length} gecontroleerd, klik op "Meer zoeken" voor meer`);
   if (!scan.found.length && exhausted) parts.push("probeer een grotere marge, een ander genre of vink 'ook buiten mijn land' aan");
   if (scan.failedBatches) parts.push("een deel kon niet gecontroleerd worden (de tempo-dienst reageerde niet)");
+  if (scan.searchErrors) parts.push(`${scan.searchErrors} zoekopdrachten bij Spotify mislukten`);
   setStatus(parts.join(" · "), scan.found.length ? "" : "error");
 }
 
@@ -371,8 +384,12 @@ async function onManualSearch(ev) {
   if (!q) return;
   box.replaceChildren(h("li", { class: "muted" }, "Zoeken…"));
   try {
-    const { tracks } = await api("/api/search", { q });
-    const valid = tracks.filter((t) => L.SPOTIFY_TRACK_URI.test(String(t.uri)));
+    const token = S.getToken();
+    if (!token) {
+      updateConnection();
+      throw new Error("Verbind eerst met Spotify (knop bovenaan de zoekkaart).");
+    }
+    const valid = await S.searchTracks(token, L.buildSearchQuery({ q }));
     box.replaceChildren(
       ...(valid.length
         ? valid.map((t) =>
@@ -412,34 +429,39 @@ function showExport(kind, content, ...extra) {
 
 const redirectUri = () => location.origin + location.pathname;
 
-async function onExport() {
-  const items = state.playlist.items;
+function connectToSpotify() {
   if (!CONFIG.SPOTIFY_CLIENT_ID || CONFIG.SPOTIFY_CLIENT_ID.startsWith("VUL_")) {
-    return showExport("error", "Het Spotify Client ID is nog niet ingesteld in public/js/config.js.");
+    return setStatus("Het Spotify Client ID is nog niet ingesteld in public/js/config.js.", "error");
   }
-  if (!items.length) return showExport("error", "Er zijn nog geen nummers in de lijst.");
-  try {
-    sessionStorage.setItem(PENDING_KEY, JSON.stringify({ name: state.playlist.name, uris: items.map((i) => i.uri) }));
-    showExport("", "Je gaat naar Spotify om toestemming te geven…");
-    await S.startLogin(CONFIG.SPOTIFY_CLIENT_ID, redirectUri());
-  } catch (err) {
-    showExport("error", err.message);
-  }
+  S.startLogin(CONFIG.SPOTIFY_CLIENT_ID, redirectUri()).catch((err) => setStatus(err.message, "error"));
 }
 
-async function finishExportIfReturning() {
-  const params = new URLSearchParams(location.search);
-  if (!params.has("code") && !params.has("error")) return;
-  let pending = null;
+function disconnectSpotify() {
+  S.clearToken();
+  updateConnection();
+  setStatus("Je bent losgekoppeld van Spotify.");
+}
+
+function updateConnection() {
+  const connected = Boolean(S.getToken());
+  $("connect-state").textContent = connected ? "Verbonden met Spotify" : "Niet verbonden met Spotify";
+  $("connect-state").className = connected ? "connected" : "";
+  $("connect-btn").hidden = connected;
+  $("disconnect-btn").hidden = !connected;
+}
+
+async function onExport() {
+  const items = state.playlist.items;
+  if (!items.length) return showExport("error", "Er zijn nog geen nummers in de lijst.");
+  const token = S.getToken();
+  if (!token) {
+    showExport("error", "Verbind eerst met Spotify met de knop 'Verbind met Spotify' bovenaan de zoekkaart. Daarna klik je opnieuw op Exporteer.");
+    return;
+  }
+  $("export-btn").disabled = true;
+  showExport("", "Playlist aanmaken op Spotify…");
   try {
-    pending = JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null");
-  } catch {}
-  sessionStorage.removeItem(PENDING_KEY);
-  try {
-    const token = await S.completeLogin(CONFIG.SPOTIFY_CLIENT_ID, redirectUri());
-    if (!pending || !Array.isArray(pending.uris)) throw new Error("Er was geen playlist om te exporteren. Probeer opnieuw.");
-    showExport("", "Playlist aanmaken op Spotify…");
-    const res = await S.exportPlaylist(token, { name: String(pending.name || ""), uris: pending.uris.map(String) });
+    const res = await S.exportPlaylist(token, { name: state.playlist.name, uris: items.map((i) => i.uri) });
     const safeLink = res.url.startsWith("https://open.spotify.com/") ? res.url : "";
     showExport(
       "ok",
@@ -448,7 +470,22 @@ async function finishExportIfReturning() {
     );
   } catch (err) {
     showExport("error", err.message);
+    updateConnection();
+  } finally {
+    $("export-btn").disabled = false;
   }
+}
+
+async function finishLoginIfReturning() {
+  const params = new URLSearchParams(location.search);
+  if (!params.has("code") && !params.has("error")) return;
+  try {
+    await S.completeLogin(CONFIG.SPOTIFY_CLIENT_ID, redirectUri());
+    setStatus("Verbonden met Spotify. Je kunt nu nummers zoeken en je playlist exporteren.");
+  } catch (err) {
+    setStatus(err.message, "error");
+  }
+  updateConnection();
 }
 
 function downloadCsv() {
@@ -471,6 +508,8 @@ function init() {
   $("export-btn").addEventListener("click", onExport);
   $("csv-btn").addEventListener("click", downloadCsv);
   $("more-btn").addEventListener("click", () => continueScan(MORE_GOAL));
+  $("connect-btn").addEventListener("click", connectToSpotify);
+  $("disconnect-btn").addEventListener("click", disconnectSpotify);
   $("pl-name").addEventListener("input", (e) => {
     state.playlist.name = e.target.value.slice(0, 100);
     saveDraft();
@@ -486,7 +525,8 @@ function init() {
     if (state.playlist.items.length && confirm("Alle nummers uit de lijst verwijderen?")) updateItems([]);
   });
   renderPlaylist();
-  finishExportIfReturning();
+  updateConnection();
+  finishLoginIfReturning();
 }
 
 init();

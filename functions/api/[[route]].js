@@ -1,14 +1,12 @@
-// Cloudflare Pages Function: de enige plek waar geheimen (API-keys) bestaan.
-// De browser praat alleen met deze proxy (zelfde domein). Het Spotify client secret en de
-// Last.fm-key komen nooit in de browser.
+// Cloudflare Pages Function: de enige plek waar een geheim (de Last.fm-key) bestaat.
+// De browser praat alleen met deze proxy (zelfde domein) voor Last.fm en tempo (ReccoBeats).
+// Spotify wordt rechtstreeks vanuit de browser aangeroepen met de eigen token van de gebruiker.
 //
-// Vereiste omgevingsvariabelen (Pages > Settings > Variables and secrets):
-//   LASTFM_KEY, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
+// Vereiste omgevingsvariabele (Pages > Settings > Variables and secrets):
+//   LASTFM_KEY
 // ReccoBeats (tempo/BPM) vraagt geen key.
 
 const RECCO = "https://api.reccobeats.com/v1";
-const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
-const SPOTIFY_API = "https://api.spotify.com/v1";
 const LASTFM = "https://ws.audioscrobbler.com/2.0/";
 const UPSTREAM_TIMEOUT_MS = 8000;
 const SPOTIFY_ID = /^[A-Za-z0-9]{22}$/;
@@ -47,22 +45,6 @@ async function upstreamFetch(url, init = {}, label = "") {
   return res;
 }
 
-// ---- Spotify app-token (client credentials). Alleen voor zoeken; geen gebruikersdata. ----
-let spotifyToken = { value: null, expires: 0 };
-
-async function getSpotifyToken(env) {
-  if (spotifyToken.value && Date.now() < spotifyToken.expires - 30_000) return spotifyToken.value;
-  const basic = btoa(`${need(env, "SPOTIFY_CLIENT_ID")}:${need(env, "SPOTIFY_CLIENT_SECRET")}`);
-  const res = await upstreamFetch(SPOTIFY_TOKEN_URL, {
-    method: "POST",
-    headers: { Authorization: `Basic ${basic}`, "content-type": "application/x-www-form-urlencoded" },
-    body: "grant_type=client_credentials",
-  }, "Spotify-aanmelding");
-  const data = await res.json();
-  spotifyToken = { value: data.access_token, expires: Date.now() + (Number(data.expires_in) || 3600) * 1000 };
-  return spotifyToken.value;
-}
-
 // ---- Invoervalidatie: alles wat doorgegeven wordt aan een externe dienst wordt strikt gecontroleerd. ----
 function intParam(params, name, lo, hi) {
   const raw = params.get(name);
@@ -77,11 +59,6 @@ function textParam(params, name, max) {
   if (!raw || raw.length > max) throw new BadRequest(`Ongeldige parameter: ${name}`);
   if (/[\u0000-\u001f\u007f]/.test(raw)) throw new BadRequest(`Ongeldige parameter: ${name}`);
   return raw;
-}
-
-function spotifyTerm(s) {
-  // Haalt tekens weg die de Spotify-zoeksyntax kunnen verstoren, en (remaster)-achtervoegels.
-  return s.replace(/\(.*?\)|\[.*?\]/g, " ").replace(/["':\\]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 // ---- Last.fm ----
@@ -164,39 +141,6 @@ const handlers = {
   async chart(params, env) {
     const page = intParam(params, "page", 1, 3);
     return lastfmTracks("chart.gettoptracks", { page: String(page) }, env);
-  },
-
-  async search(params, env) {
-    let q;
-    if (params.has("title")) {
-      const title = spotifyTerm(textParam(params, "title", 120));
-      const artist = spotifyTerm(textParam(params, "artist", 120));
-      if (!title || !artist) throw new BadRequest("Ongeldige parameter: title/artist");
-      q = `track:${title} artist:${artist}`;
-    } else {
-      q = spotifyTerm(textParam(params, "q", 100));
-      if (!q) throw new BadRequest("Ongeldige parameter: q");
-    }
-    const token = await getSpotifyToken(env);
-    const res = await upstreamFetch(`${SPOTIFY_API}/search?${new URLSearchParams({ q, type: "track", limit: "5" })}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    }, "Spotify-zoeken");
-    const d = await res.json();
-    const items = Array.isArray(d?.tracks?.items) ? d.tracks.items : [];
-    const tracks = items
-      .filter((t) => t && typeof t.uri === "string")
-      .map((t) => {
-        const images = t.album?.images || [];
-        return {
-          uri: t.uri,
-          name: String(t.name ?? ""),
-          artists: (t.artists || []).map((a) => String(a?.name ?? "")),
-          album: String(t.album?.name ?? ""),
-          image: images.length ? images[Math.min(1, images.length - 1)].url : "",
-          durationMs: Number(t.duration_ms) || 0,
-        };
-      });
-    return { ttl: 6 * 3600, data: { tracks } };
   },
 };
 

@@ -115,6 +115,39 @@ export function pickBestMatch(tracks, item) {
   return null;
 }
 
+function searchTerm(s) {
+  // Haalt tekens weg die de Spotify-zoeksyntax kunnen verstoren, en (remaster)-achtervoegsels.
+  return String(s ?? "").replace(/\(.*?\)|\[.*?\]/g, " ").replace(/["':\\]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** Zoekopdracht voor Spotify: op titel + artiest, of vrije tekst. */
+export function buildSearchQuery({ title, artist, q }) {
+  if (title != null) {
+    const t = searchTerm(title).slice(0, 120);
+    const a = searchTerm(artist).slice(0, 120);
+    return t && a ? `track:${t} artist:${a}` : "";
+  }
+  return searchTerm(q).slice(0, 100);
+}
+
+/** Zet een Spotify-zoekantwoord om naar een slank formaat. */
+export function mapSpotifyTracks(data) {
+  const items = Array.isArray(data?.tracks?.items) ? data.tracks.items : [];
+  return items
+    .filter((t) => t && typeof t.uri === "string" && SPOTIFY_TRACK_URI.test(t.uri))
+    .map((t) => {
+      const images = t.album?.images || [];
+      return {
+        uri: t.uri,
+        name: String(t.name ?? ""),
+        artists: (t.artists || []).map((a) => String(a?.name ?? "")),
+        album: String(t.album?.name ?? ""),
+        image: images.length ? String(images[Math.min(1, images.length - 1)].url ?? "") : "",
+        durationMs: Number(t.duration_ms) || 0,
+      };
+    });
+}
+
 export function moveItem(arr, from, to) {
   if (from === to || from < 0 || to < 0 || from >= arr.length || to >= arr.length) return arr.slice();
   const copy = arr.slice();

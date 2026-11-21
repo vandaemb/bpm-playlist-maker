@@ -1,5 +1,3 @@
 # Kopieer naar .dev.vars voor lokaal testen (staat in .gitignore). NOOIT committen.
 
 LASTFM_KEY=
-SPOTIFY_CLIENT_ID=
-SPOTIFY_CLIENT_SECRET=

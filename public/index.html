@@ -20,11 +20,11 @@
       <details open>
         <summary id="h-help">Hoe zet ik mijn playlist in Spotify?</summary>
         <ol>
-          <li><strong>Zoek nummers.</strong> Vul je BPM, eventueel een genre en je land in en klik op <em>Zoek nummers</em>.</li>
+          <li><strong>Verbind met Spotify.</strong> Klik op <em>Verbind met Spotify</em>, log in bij Spotify en klik op <em>Akkoord</em>. Je wachtwoord blijft bij Spotify en deze site bewaart niets op een server. Dit hoeft eenmalig per bezoek.</li>
+          <li><strong>Zoek nummers.</strong> Vul je BPM, eventueel een genre en je land in en klik op <em>Zoek nummers</em>. Dit kan even duren, de eerste resultaten verschijnen snel.</li>
           <li><strong>Bouw je lijst.</strong> Klik op <em>Toevoegen</em> bij de nummers die je wilt (of <em>Voeg de eerste 25 toe</em>). Pas daarna de volgorde aan door te slepen of te sorteren, en voeg zelf nummers toe via <em>Zoek op Spotify</em>.</li>
           <li><strong>Geef de playlist een naam</strong> bij <em>Jouw playlist</em>.</li>
-          <li><strong>Klik op <em>Exporteer naar Spotify</em>.</strong> Je gaat naar Spotify. Log in en klik op <em>Akkoord</em> zodat de site één playlist mag aanmaken. Je wachtwoord blijft bij Spotify.</li>
-          <li><strong>Klaar.</strong> Je komt terug op deze site met de knop <em>Open in Spotify</em>. De playlist staat nu ook in <em>Jouw bibliotheek</em> in Spotify en is privé tot je hem zelf deelt.</li>
+          <li><strong>Klik op <em>Exporteer naar Spotify</em>.</strong> Je krijgt een knop <em>Open in Spotify</em>. De playlist staat dan in <em>Jouw bibliotheek</em> in Spotify en is privé tot je hem zelf deelt.</li>
         </ol>
         <p class="small muted"><strong>Foutmelding of geen toegang (403)?</strong> Deze site mag alleen exporteren voor personen die de beheerder bij Spotify heeft toegevoegd. Vraag de beheerder om je Spotify-e-mailadres toe te voegen.</p>
         <p class="small muted"><strong>Geen toegang tot de export?</strong> Klik op <em>Download als CSV</em>. Open het bestand, klik op de Spotify-link van een nummer, kies in Spotify <em>•••</em> → <em>Toevoegen aan afspeellijst</em> en kies of maak je playlist.</p>
@@ -33,6 +33,11 @@
 
     <section class="panel" aria-labelledby="h-find">
       <h2 id="h-find">1. Nummers zoeken</h2>
+      <div id="connect-bar" class="connect">
+        <span id="connect-state">Niet verbonden met Spotify</span>
+        <button type="button" id="connect-btn" class="primary">Verbind met Spotify</button>
+        <button type="button" id="disconnect-btn" class="ghost" hidden>Verbinding verbreken</button>
+      </div>
       <form id="search-form" class="grid" novalidate>
         <label>BPM
           <input id="bpm" type="number" min="40" max="220" value="120" inputmode="numeric" required>
