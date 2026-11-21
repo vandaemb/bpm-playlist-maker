@@ -153,17 +153,17 @@ const handlers = {
       }
     };
     const out = {};
-    const search = await probe("https://api.deezer.com/search?q=" + encodeURIComponent('artist:"daft punk" track:"one more time"') + "&limit=1");
-    const id = search.body?.data?.[0]?.id;
-    out.deezer_search = search.status;
-    if (id) {
-      const track = await probe(`https://api.deezer.com/track/${Number(id)}`);
-      out.deezer_track = track.status;
-      out.deezer_bpm = track.body?.bpm ?? null;
-    }
-    const isrc = await probe("https://api.deezer.com/track/isrc:GBDUW0000059");
-    out.deezer_isrc = isrc.status;
-    out.deezer_isrc_bpm = isrc.body?.bpm ?? null;
+    const queries = ["daft punk one more time", "the weeknd blinding lights", "abba dancing queen", "dua lipa levitating", "stromae alors on danse", "avicii levels", "queen don't stop me now", "pharrell happy"];
+    const rows = await Promise.all(
+      queries.map(async (q) => {
+        const search = await probe("https://api.deezer.com/search?q=" + encodeURIComponent(q) + "&limit=1");
+        const first = search.body?.data?.[0];
+        if (!first) return { q, search: search.status, hit: false };
+        const track = await probe(`https://api.deezer.com/track/${Number(first.id)}`);
+        return { q, search: search.status, track: track.status, bpm: track.body?.bpm ?? null };
+      }),
+    );
+    out.deezer = rows;
     const recco = await probe(`${RECCO}/audio-features?ids=0VjIjW4GlUZAMYd2vXMi3b`);
     out.reccobeats = recco.status;
     out.reccobeats_tempo = recco.body?.content?.[0]?.tempo ?? null;
