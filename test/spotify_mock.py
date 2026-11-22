@@ -9,6 +9,9 @@ CORS = {"access-control-allow-origin": "*", "access-control-allow-headers": "aut
 YEARS = {"Belgian Banger": "1985-06-01", "Intl Pop": "1995", "Slow Song": "2001-01-01", "<img src=x onerror=alert1>": "2010-10-10", "Pop Hit": "1975-04-04"}
 
 
+ISRC = {"TESTBB000001": "Belgian Banger", "TESTIP000001": "Intl Pop", "TESTSS000001": "Slow Song", "TESTIM000001": "<img src=x onerror=alert1>", "TESTPH000001": "Pop Hit"}
+
+
 def id_for(title: str) -> str:
     return ("".join(f"{b:02x}" for b in title.encode()) + "x" * 22)[:22]
 
@@ -27,7 +30,11 @@ def install(page, mode="ok", log=None):
         assert req.headers["authorization"] == "Bearer TESTTOKEN", req.headers
         q = parse_qs(urlparse(req.url).query)["q"][0]
         m = re.match(r"track:(.*) artist:(.*)$", q)
-        name, artist = (m.group(1), m.group(2)) if m else (q, "Manual Artist")
+        i = re.match(r"isrc:(\w+)$", q)
+        if i:
+            name, artist = ISRC.get(i.group(1), "Unknown Track"), "Mock Artist"
+        else:
+            name, artist = (m.group(1), m.group(2)) if m else (q, "Manual Artist")
         if name == "Unknown Track":
             items = []
         else:

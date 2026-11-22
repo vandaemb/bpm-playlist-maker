@@ -104,24 +104,36 @@ async function deezerJson(url) {
   return body;
 }
 
-/** { ok:false } = Deezer gaf een fout (niets afleiden); { ok:true, tempo } = antwoord (tempo kan null zijn). */
-async function deezerTempo(artist, title) {
+/**
+ * Zoekt een nummer op Deezer op artiest + titel.
+ * { ok:false } = Deezer gaf een fout (niets afleiden); anders { ok:true, found, tempo, year, isrc }.
+ */
+async function deezerInfo(artist, title) {
+  const none = { ok: true, found: false, tempo: null, year: null, isrc: "" };
   try {
     const wa = normName(artist);
     const wt = normName(title);
-    if (!wa || !wt) return { ok: true, tempo: null };
+    if (!wa || !wt) return none;
     const found = await deezerJson(`${DEEZER}/search?${new URLSearchParams({ q: `${artist} ${title}`.slice(0, 150), limit: "5" })}`);
     const hit = (Array.isArray(found?.data) ? found.data : []).find((t) => {
       const ta = normName(t?.title);
       const aa = normName(t?.artist?.name);
       return aa && (ta === wt || ta.startsWith(wt) || wt.startsWith(ta)) && (wa.includes(aa) || aa.includes(wa));
     });
-    if (!hit || !Number.isInteger(hit.id)) return { ok: true, tempo: null };
-    const bpm = Number((await deezerJson(`${DEEZER}/track/${hit.id}`))?.bpm);
-    return { ok: true, tempo: Number.isFinite(bpm) && bpm > 0 ? bpm : null };
+    if (!hit || !Number.isInteger(hit.id)) return none;
+    const track = await deezerJson(`${DEEZER}/track/${hit.id}`);
+    const bpm = Number(track?.bpm);
+    const year = /^(\d{4})-/.exec(String(track?.release_date ?? ""));
+    const isrc = /^[A-Z0-9]{12}$/.test(String(track?.isrc ?? "")) ? track.isrc : "";
+    return { ok: true, found: true, tempo: Number.isFinite(bpm) && bpm > 0 ? bpm : null, year: year ? Number(year[1]) : null, isrc };
   } catch {
     return { ok: false };
   }
+}
+
+async function deezerTempo(artist, title) {
+  const r = await deezerInfo(artist, title);
+  return r.ok ? { ok: true, tempo: r.tempo } : { ok: false };
 }
 
 async function mapLimit(items, limit, fn) {
@@ -236,6 +248,30 @@ const handlers = {
     return { ttl: 0, data: { tempos: await tempoFor([...new Set(ids)], names, waitUntil) } };
   },
 
+  // Deezer-gegevens (BPM, jaar, ISRC) voor tot 20 nummers, parallel aan elkaar (a = artiesten, t = titels).
+  async deezer(params, env, waitUntil) {
+    const artists = params.getAll("a");
+    const titles = params.getAll("t");
+    const ok = (v) => v.length > 0 && v.length <= MAX_NAME && !/[\u0000-\u001f\u007f]/.test(v);
+    if (!artists.length || artists.length > MAX_IDS || artists.length !== titles.length || !artists.every(ok) || !titles.every(ok)) {
+      throw new BadRequest("Ongeldige parameter: a/t");
+    }
+    const cache = typeof caches !== "undefined" ? caches.default : null;
+    const keyFor = (a, t) => new Request(`https://cache.internal/dz/${encodeURIComponent(normName(a))}/${encodeURIComponent(normName(t))}`);
+    const items = await mapLimit(artists.map((a, i) => [a, titles[i]]), DEEZER_CONCURRENCY, async ([a, t]) => {
+      const key = keyFor(a, t);
+      const hit = cache ? await cache.match(key) : null;
+      if (hit) return hit.json();
+      const info = await deezerInfo(a, t);
+      if (!info.ok) return { ok: false };
+      const out = { ok: true, found: info.found, tempo: info.tempo, year: info.year, isrc: info.isrc };
+      if (cache) waitUntil(cache.put(key, new Response(JSON.stringify(out), { headers: { "cache-control": `public, max-age=${info.tempo ? 7 * DAY : DAY}` } })));
+      return out;
+    });
+    if (items.every((i) => !i.ok)) throw new Upstream("fout", "Deezer");
+    return { ttl: 0, data: { items } };
+  },
+
   async lastfm(params, env) {
     const country = textParam(params, "country", 60);
     if (!/^[A-Za-z][A-Za-z .,'()-]*$/.test(country)) throw new BadRequest("Ongeldige parameter: country");
@@ -256,7 +292,7 @@ const handlers = {
   },
 };
 
-const NO_URL_CACHE = new Set(["tempo"]);
+const NO_URL_CACHE = new Set(["tempo", "deezer"]);
 
 // Blokkeert andere websites die jouw proxy (en dus jouw API-quota) willen meebenutten.
 // Browsers sturen Sec-Fetch-Site mee en dat kan een pagina niet vervalsen.

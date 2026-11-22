@@ -150,7 +150,7 @@ globalThis.fetch = async (url, init = {}) => {
     if (q.includes("Cover")) return ok({ data: [{ id: 79, title: "Cover Song", artist: { name: "Other Band" } }] });
     return ok({ data: [] });
   }
-  if (u === "https://api.deezer.com/track/77") return ok({ id: 77, bpm: 128.4 });
+  if (u === "https://api.deezer.com/track/77") return ok({ id: 77, bpm: 128.4, release_date: "1999-05-21", isrc: "GBAAA9900001" });
   if (u === "https://api.deezer.com/track/78") return ok({ id: 78, bpm: 0 });
   return new Response("{}", { status: 500 });
 };
@@ -215,6 +215,27 @@ await test("proxy: ReccoBeats faalt (429) maar Deezer weet het: geen fout; Deeze
   assert.equal(ok.body.tempos[Z5], 128.4);
   assert.equal(bad.res.status, 502);
   assert.equal(noNames.res.status, 502);
+});
+
+await test("proxy: deezer geeft BPM, jaar en ISRC per nummer, in dezelfde volgorde; onbekend = niet gevonden", async () => {
+  const { res, body } = await run("/api/deezer?a=Some%20Artist&t=Known%20Song&a=Nobody&t=Unknown%20Thing&a=Some%20Artist&t=Zero%20Song");
+  assert.equal(res.status, 200);
+  assert.deepEqual(body.items[0], { ok: true, found: true, tempo: 128.4, year: 1999, isrc: "GBAAA9900001" });
+  assert.equal(body.items[1].found, false);
+  assert.equal(body.items[2].tempo, null, "BPM 0 = onbekend");
+  const n = calls.length;
+  await run("/api/deezer?a=Some%20Artist&t=Known%20Song");
+  assert.equal(calls.length, n, "gecachet");
+});
+
+await test("proxy: deezer valideert invoer en faalt als Deezer overal faalt", async () => {
+  assert.equal((await run("/api/deezer")).res.status, 400);
+  assert.equal((await run("/api/deezer?a=X&a=Y&t=Z")).res.status, 400);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("{}", { status: 500 });
+  const bad = await run("/api/deezer?a=Fresh%20Artist&t=Fresh%20Title");
+  globalThis.fetch = realFetch;
+  assert.equal(bad.res.status, 502);
 });
 
 await test("proxy: namen moeten even lang zijn als de ID's", async () => {

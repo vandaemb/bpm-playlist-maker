@@ -18,6 +18,14 @@ const idFor = (title) => (Buffer.from(title).toString("hex") + "x".repeat(22)).s
 const idToTempo = {};
 for (const [t, bpm] of Object.entries(TEMPO)) idToTempo[idFor(t)] = bpm;
 
+// Deezer-gegevens per titel: [bpm, jaar, isrc]
+const DZ = {
+  "Belgian Banger": [120, 1985, "TESTBB000001"],
+  "Intl Pop": [119, 1995, "TESTIP000001"],
+  "Slow Song": [80, 2001, "TESTSS000001"],
+  "<img src=x onerror=alert1>": [121, 2010, "TESTIM000001"],
+  "Pop Hit": [120, 1975, "TESTPH000001"],
+};
 const TAG_POP = [
   { name: "Intl Pop", artist: { name: "Star" } },
   { name: "Pop Hit", artist: { name: "Someone" } },
@@ -35,6 +43,10 @@ http
     const u = new URL(req.url, "http://x");
     const page = u.searchParams.get("page");
     if (u.pathname === "/api/lastfm-tag") return json(res, { tracks: page === "1" ? TAG_POP.map((t) => ({ name: t.name, artist: t.artist.name })) : [] });
+    if (u.pathname === "/api/deezer") {
+      const titles = u.searchParams.getAll("t");
+      return json(res, { items: titles.map((t) => (DZ[t] ? { ok: true, found: true, tempo: DZ[t][0], year: DZ[t][1], isrc: DZ[t][2] } : { ok: true, found: false, tempo: null, year: null, isrc: "" })) });
+    }
     if (u.pathname === "/api/tempo") {
       const ids = (u.searchParams.get("ids") || "").split(",");
       return json(res, { tempos: Object.fromEntries(ids.map((i) => [i, idToTempo[i] ?? null])) });

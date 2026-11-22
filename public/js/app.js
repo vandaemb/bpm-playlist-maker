@@ -176,40 +176,47 @@ const currentYears = () => [Number($("year-from").value), Number($("year-to").va
 
 // ---------- zoeken ----------
 // Stappen: (1) kandidaten uit Last.fm (land en/of genre), (2) per kandidaat het echte nummer op
-// Spotify zoeken, (3) het tempo van die nummers opvragen (ReccoBeats), (4) filteren op BPM.
+// Deezer vragen om BPM, jaar en ISRC (geen Spotify nodig), (3) alleen voor nummers die kloppen het echte nummer op Spotify zoeken.
 // Dat gebeurt in rondes van 20, zodat de eerste resultaten snel verschijnen.
 async function fetchLastfm(path, params, pages) {
   const settled = await Promise.allSettled(Array.from({ length: pages }, (_, i) => api(path, { ...params, page: i + 1 })));
   return settled.filter((r) => r.status === "fulfilled").flatMap((r) => r.value.tracks || []);
 }
 
-function uniqueTempoItems(matched) {
-  const seen = new Set();
-  const out = [];
-  for (const m of matched) {
-    if (seen.has(m.spotifyId)) continue;
-    seen.add(m.spotifyId);
-    out.push({ id: m.spotifyId, artist: m.best.artists[0] || m.c.artist, title: m.best.name });
-  }
-  return out;
-}
-
-// Tempo opvragen met geduld: bij "limiet bereikt" (429) of een tijdelijke fout wachten we steeds langer.
-const TEMPO_WAITS = [3, 8, 20, 45]; // seconden tussen de pogingen
-async function fetchTempos(items, onWait) {
-  const ids = items.map((i) => i.id);
+// Deezer opvragen met geduld bij tijdelijke fouten.
+const DEEZER_WAITS = [3, 8, 20];
+async function fetchDeezer(batch, onWait) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return (await api("/api/tempo", { ids: ids.join(","), a: items.map((i) => i.artist), t: items.map((i) => i.title) })).tempos || {};
+      const res = await api("/api/deezer", { a: batch.map((c) => c.artist), t: batch.map((c) => c.title) });
+      return Array.isArray(res.items) ? res.items : [];
     } catch (err) {
-      if (attempt >= TEMPO_WAITS.length) throw err;
-      const secs = TEMPO_WAITS[attempt];
-      for (let left = secs; left > 0; left--) {
-        onWait?.(left, /429|limiet/.test(err.message));
+      if (attempt >= DEEZER_WAITS.length) throw err;
+      for (let left = DEEZER_WAITS[attempt]; left > 0; left--) {
+        onWait?.(left);
         await sleep(1000);
       }
     }
   }
+}
+
+// Zoekt het nummer op Spotify: eerst op ISRC (exact), anders op titel en artiest. Resultaten worden bewaard.
+async function findOnSpotify(token, c, d) {
+  const key = L.normKey(c.title, c.artist);
+  const recalled = recalledMatch(key);
+  if (recalled !== undefined) return recalled;
+  let best = null;
+  if (d.isrc) {
+    const byIsrc = await S.searchTracks(token, `isrc:${d.isrc}`);
+    best = byIsrc[0] || null;
+  }
+  if (!best) {
+    let tracks = await S.searchTracks(token, L.buildSearchQuery({ title: c.title, artist: c.artist }));
+    if (!tracks.length) tracks = await S.searchTracks(token, L.buildSearchQuery({ q: `${c.artist} ${c.title}` }));
+    best = L.pickBestMatch(tracks, c);
+  }
+  rememberMatch(key, best);
+  return best;
 }
 
 async function onSearch(ev) {
@@ -237,7 +244,7 @@ async function onSearch(ev) {
     const genreTracks = await fetchLastfm("/api/lastfm-tag", { tag: genre }, 10);
     if (!genreTracks.length) throw new Error("Last.fm gaf geen nummers terug voor dit genre. Controleer de spelling of probeer een ander genre.");
     const candidates = L.buildPool({ genreTracks });
-    state.scan = { id, candidates, index: 0, bpm, tol, yearFrom, yearTo, found: [], keys: new Set(), running: false, paused: "", failedBatches: 0, searchErrors: 0, outOfYears: 0, onSpotify: 0, withTempo: 0, noMatch: 0, sample: "", lastSearchError: "" };
+    state.scan = { id, candidates, index: 0, bpm, tol, yearFrom, yearTo, found: [], keys: new Set(), running: false, paused: "", failedBatches: 0, searchErrors: 0, outOfYears: 0, onSpotify: 0, withTempo: 0, noMatch: 0, sample: "", lastSearchError: "", dzErrors: 0, notOnDeezer: 0, noBpm: 0, hitsTotal: 0 };
     await continueScan(FIRST_GOAL);
   } catch (err) {
     setStatus(`Zoeken mislukt: ${err.message}`, "error");
@@ -248,7 +255,12 @@ async function onSearch(ev) {
 
 // Laat zien waar nummers afvallen: handig om te zien welke stap weinig oplevert.
 function breakdown(scan) {
-  return `op Spotify gevonden: ${scan.onSpotify}, in jaarbereik: ${scan.onSpotify - scan.outOfYears}, met tempo: ${scan.withTempo}${scan.noMatch ? `, zonder passend Spotify-resultaat: ${scan.noMatch}` : ""}${scan.sample ? ` (${scan.sample})` : ""}${scan.searchErrors ? `, Spotify-fouten: ${scan.searchErrors} (laatste: ${scan.lastSearchError})` : ""}`;
+  const onDeezer = scan.index - scan.notOnDeezer - scan.dzErrors;
+  const parts = [`op Deezer gevonden: ${onDeezer}`, `met BPM: ${scan.withTempo}`, `binnen BPM en jaar: ${scan.hitsTotal}`, `op Spotify: ${scan.onSpotify}`];
+  if (scan.noBpm) parts.push(`zonder BPM bij Deezer: ${scan.noBpm}`);
+  if (scan.noMatch) parts.push(`niet op Spotify: ${scan.noMatch}`);
+  if (scan.searchErrors) parts.push(`Spotify-fouten: ${scan.searchErrors} (laatste: ${scan.lastSearchError})`);
+  return parts.join(", ");
 }
 
 async function continueScan(extra) {
@@ -268,91 +280,75 @@ async function continueScan(extra) {
       scan.index += batch.length;
       setStatus(`Zoeken… ${scan.index} van ${scan.candidates.length} nummers gecontroleerd · ${scan.found.length} gevonden · ${breakdown(scan)}`);
 
-      const token = S.getToken();
-      if (!token) throw new S.SpotifyAuthError("Je Spotify-verbinding is verlopen. Verbind opnieuw met Spotify.");
-      let stopBatch = null; // na een blijvende 429 slaan we de rest van deze groep over
-      const looked = await pool(batch, 1, async (c) => {
-        if (stopBatch) throw stopBatch;
-        try {
-          return await lookup(c);
-        } catch (err) {
-          if (err instanceof S.SpotifyRateLimitError) stopBatch = err;
-          throw err;
-        }
-      });
-      async function lookup(c) {
-        const key = L.normKey(c.title, c.artist);
-        let best = recalledMatch(key);
-        if (best === undefined) {
-          let tracks = await S.searchTracks(token, L.buildSearchQuery({ title: c.title, artist: c.artist }));
-          // Soms geeft de gestructureerde zoekopdracht niets terug: probeer dan gewone tekst.
-          if (!tracks.length) tracks = await S.searchTracks(token, L.buildSearchQuery({ q: `${c.artist} ${c.title}` }));
-          best = L.pickBestMatch(tracks, c);
-          rememberMatch(key, best);
-          if (!best) {
-            scan.noMatch++;
-            if (!scan.sample) {
-              const f = tracks[0];
-              scan.sample = `bv. gezocht "${c.title} – ${c.artist}", Spotify gaf ${tracks.length} resultaten${f ? ` (eerste: "${f.name} – ${f.artists[0] || "?"}")` : ""}`.slice(0, 220);
-            }
-          }
-        }
-        return best ? { c, best, spotifyId: L.spotifyIdFromUri(best.uri) } : null;
-      }
-      if (scan.id !== state.scanId) return;
-      // Fouten waar opnieuw proberen niets helpt (403/401) breken de zoekopdracht af met een duidelijke melding.
-      const fatal = looked.find((r) => !r.ok && r.error instanceof S.SpotifyAuthError);
-      if (fatal) throw fatal.error;
-      const limited = looked.find((r) => !r.ok && r.error instanceof S.SpotifyRateLimitError);
-      if (limited) {
-        // Reeds gevonden zoekresultaten staan in de bewaarde lijst; deze groep wordt bij hervatten snel herhaald.
-        scan.index -= batch.length;
-        scan.paused = limited.error.message;
-        break;
-      }
-      const failed = looked.filter((r) => !r.ok);
-      scan.searchErrors += failed.length;
-      if (failed.length) scan.lastSearchError = failed[failed.length - 1].error.message;
-      const matched = looked.filter((r) => r.ok && r.value).map((r) => r.value);
-      scan.onSpotify += matched.length;
-      // Jaarfilter vóór de tempo-opvraging: bespaart tempo-aanvragen.
-      const inYears = matched.filter((m) => L.yearMatches(m.best.year, scan.yearFrom, scan.yearTo));
-      scan.outOfYears += matched.length - inYears.length;
-      if (!inYears.length) continue;
-
-      let tempos = {};
+      // Stap 1: Deezer geeft BPM, jaar en ISRC voor de hele groep. Dit kost geen Spotify-aanvragen.
+      let info;
       try {
-        tempos = await fetchTempos(uniqueTempoItems(inYears), (left, limited) => {
-          if (scan.id === state.scanId) {
-            setStatus(`${limited ? "Een tempo-dienst zegt: te veel aanvragen." : "De tempo-dienst reageert niet."} Nieuwe poging over ${left} s… · ${scan.found.length} gevonden`);
-          }
+        info = await fetchDeezer(batch, (left) => {
+          if (scan.id === state.scanId) setStatus(`Deezer reageert niet. Nieuwe poging over ${left} s… · ${scan.found.length} gevonden`);
         });
       } catch (err) {
-        // Niet doorgaan en deze groep overslaan: zet de zoekopdracht stil zodat "Meer zoeken" hem later hervat.
         scan.index -= batch.length;
-        scan.paused = `de tempo-dienst blijft fouten geven (${err.message})`;
+        scan.paused = `Deezer blijft fouten geven (${err.message})`;
         break;
       }
       if (scan.id !== state.scanId) return;
-      for (const m of inYears) {
-        const tempo = tempos[m.spotifyId];
-        if (tempo != null) scan.withTempo++;
-        if (!L.tempoMatches(tempo, scan.bpm, scan.tol)) continue;
-        const title = m.best.name;
-        const artist = m.best.artists[0] || m.c.artist;
+      const hits = [];
+      batch.forEach((c, i) => {
+        const d = info[i];
+        if (!d?.ok) return void scan.dzErrors++;
+        if (!d.found) return void scan.notOnDeezer++;
+        if (d.tempo == null) return void scan.noBpm++;
+        scan.withTempo++;
+        if (!L.tempoMatches(d.tempo, scan.bpm, scan.tol)) return;
+        if (d.year != null && !L.yearMatches(d.year, scan.yearFrom, scan.yearTo)) return void scan.outOfYears++;
+        scan.hitsTotal++;
+        hits.push({ c, d });
+      });
+      if (!hits.length) continue;
+
+      // Stap 2: Spotify alleen voor de nummers die al kloppen (voor de link en de export).
+      const token = S.getToken();
+      if (!token) throw new S.SpotifyAuthError("Je Spotify-verbinding is verlopen. Verbind opnieuw met Spotify.");
+      let limited = null;
+      for (const { c, d } of hits) {
+        let best;
+        try {
+          best = await findOnSpotify(token, c, d);
+        } catch (err) {
+          if (err instanceof S.SpotifyAuthError) throw err;
+          if (err instanceof S.SpotifyRateLimitError) {
+            limited = err;
+            break;
+          }
+          scan.searchErrors++;
+          scan.lastSearchError = err.message;
+          continue;
+        }
+        if (scan.id !== state.scanId) return;
+        if (!best) {
+          scan.noMatch++;
+          continue;
+        }
+        scan.onSpotify++;
+        const year = d.year ?? best.year;
+        if (!L.yearMatches(year, scan.yearFrom, scan.yearTo)) {
+          scan.outOfYears++;
+          continue;
+        }
+        const title = best.name;
+        const artist = best.artists[0] || c.artist;
         const key = L.normKey(title, artist);
         if (scan.keys.has(key)) continue;
         scan.keys.add(key);
-        scan.found.push({
-          key,
-          title,
-          artist,
-          bpm: Math.round(tempo),
-          uri: m.best.uri,
-          image: safeImage(m.best.image),
-          durationMs: m.best.durationMs,
-          year: m.best.year,
-        });
+        scan.found.push({ key, title, artist, bpm: Math.round(d.tempo), uri: best.uri, image: safeImage(best.image), durationMs: best.durationMs, year });
+      }
+      if (limited) {
+        // Wat al gevonden is blijft staan; Deezer-antwoorden en Spotify-zoekresultaten zijn bewaard, hervatten gaat snel.
+        scan.index -= batch.length;
+        scan.paused = limited.message;
+        state.results = scan.found;
+        renderResults();
+        break;
       }
       state.results = scan.found;
       renderResults();
