@@ -105,7 +105,8 @@ await test("dataBuckets: blokken van 10 BPM die bpm ± marge afdekken", () => {
   assert.deepEqual(L.dataBuckets(120, 0), [120]);
   assert.deepEqual(L.dataBuckets(119, 2), [110, 120]);
   assert.deepEqual(L.dataBuckets(125, 5), [120, 130]);
-  assert.deepEqual(L.dataBuckets(45, 5), [40]);
+  assert.deepEqual(L.dataBuckets(45, 5), [40, 50]);
+  assert.deepEqual(L.dataBuckets(41, 1), [40]);
   assert.deepEqual(L.dataBuckets(220, 5), [210]);
 });
 
