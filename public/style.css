@@ -190,3 +190,8 @@ footer a { color: inherit; }
 .mock .menu { background: var(--card); border-radius: 8px; padding: 6px 10px; align-self: flex-end; box-shadow: 0 1px 6px rgba(0,0,0,.2); }
 .mock .pick { color: var(--accent); font-weight: 600; }
 @media (prefers-reduced-motion: reduce) { .screen { height: auto; display: grid; gap: 12px; padding: 12px; } .scene { position: static; opacity: 1; animation: none; } }
+
+.coffee { text-align: center; margin: 28px 0 0; color: var(--muted); font-size: 0.95rem; }
+.coffee p { margin: 0 0 10px; }
+.pill { display: inline-block; background: #ffdd00; color: #1d1d1f; font-weight: 600; text-decoration: none; padding: 10px 20px; border-radius: 99px; }
+.pill:hover { filter: brightness(0.96); }

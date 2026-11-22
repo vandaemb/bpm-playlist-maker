@@ -1,5 +1,5 @@
 import * as L from "./logic.js";
-import { t, apply, setLang, getLang, allValues } from "./i18n.js";
+import { t, apply, setLang } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
 const DRAFT_KEY = "bpm-playlist-draft-v1";
@@ -54,9 +54,9 @@ function loadDraft() {
         image: safeImage(i.image),
         durationMs: Number(i.durationMs) || 0,
       }));
-    return { name: String(d.name || "").slice(0, 100), items };
+    return { items };
   } catch {
-    return { name: "", items: [] };
+    return { items: [] };
   }
 }
 
@@ -297,7 +297,7 @@ function downloadCsv() {
   const items = state.playlist.items;
   if (!items.length) return showExport("error", "exp.emptyCsv");
   const blob = new Blob(["﻿" + L.toCsv(items, [t("csv.title"), t("csv.artist"), "BPM", t("csv.link")])], { type: "text/csv;charset=utf-8" });
-  const a = h("a", { href: URL.createObjectURL(blob), download: (state.playlist.name || t("pl.defaultName")).replace(/[^\w\- ]+/g, "").trim() + ".csv" });
+  const a = h("a", { href: URL.createObjectURL(blob), download: "bpm-playlist.csv" });
   document.body.append(a);
   a.click();
   a.remove();
@@ -305,16 +305,9 @@ function downloadCsv() {
 }
 
 // ---------- opstart ----------
-const DEFAULT_NAMES = allValues("pl.defaultName");
-
 // Alles wat de taal raakt opnieuw tekenen, zonder de pagina te herladen.
 function rerender() {
   apply();
-  const nameEl = $("pl-name");
-  if (!state.playlist.name || DEFAULT_NAMES.includes(state.playlist.name)) {
-    state.playlist.name = t("pl.defaultName");
-    nameEl.value = state.playlist.name;
-  }
   if (lastStatus) setStatus(lastStatus.key, lastStatus.kind, lastStatus.params);
   renderExport();
   renderPlaylist();
@@ -366,16 +359,10 @@ function init() {
   setupYears();
   setupTempo();
   for (const b of document.querySelectorAll("[data-lang]")) b.addEventListener("click", () => setLang(b.dataset.lang) && rerender());
-  if (!state.playlist.name) state.playlist.name = t("pl.defaultName");
-  $("pl-name").value = state.playlist.name;
   $("search-form").addEventListener("submit", onSearch);
   $("csv-btn").addEventListener("click", downloadCsv);
   $("copy-btn").addEventListener("click", copyLinks);
   $("more-btn").addEventListener("click", showMore);
-  $("pl-name").addEventListener("input", (e) => {
-    state.playlist.name = e.target.value.slice(0, 100);
-    saveDraft();
-  });
   $("sort").addEventListener("change", (e) => {
     if (e.target.value) updateItems(L.sortTracks(state.playlist.items, e.target.value));
     e.target.value = "";
