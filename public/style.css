@@ -203,3 +203,6 @@ footer a { color: inherit; }
 }
 .coffee .cup { display: none; }
 @media (min-width: 1200px) { .coffee .cup { display: block; } }
+
+.bmc-link { display: inline-block; margin-bottom: 12px; }
+.bmc { display: block; width: 170px; max-width: 100%; height: auto; background: #fff; border-radius: 12px; padding: 6px 10px; }
