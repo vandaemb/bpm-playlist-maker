@@ -195,3 +195,11 @@ footer a { color: inherit; }
 .coffee p { margin: 0 0 10px; }
 .pill { display: inline-block; background: #ffdd00; color: #1d1d1f; font-weight: 600; text-decoration: none; padding: 10px 20px; border-radius: 99px; }
 .pill:hover { filter: brightness(0.96); }
+
+/* brede schermen: de donatiekaart zweeft links naast het formulier; op smalle schermen blijft hij onderaan */
+@media (min-width: 1200px) {
+  .coffee { position: fixed; top: 150px; left: calc(50% - 380px - 240px); width: 210px; margin: 0; padding: 18px; background: var(--card); border-radius: var(--radius); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04); font-size: 0.9rem; }
+  .coffee .cup { display: block; font-size: 2.4rem; line-height: 1; margin-bottom: 8px; }
+}
+.coffee .cup { display: none; }
+@media (min-width: 1200px) { .coffee .cup { display: block; } }
