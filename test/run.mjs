@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import * as L from "../public/js/logic.js";
 import { challengeFor } from "../public/js/spotify.js";
-import { onRequestGet, onRequest } from "../functions/api/[[route]].js";
 
 let passed = 0;
 const test = async (name, fn) => {
@@ -29,12 +28,6 @@ await test("tempoMatches: marge, afronding, ontbrekend tempo", () => {
 await test("normKey negeert accenten, (remaster), feat. en hoofdletters", () => {
   assert.equal(L.normKey("Café del Mar (Remastered 2019)", "Energy 52"), L.normKey("cafe del mar", "ENERGY 52"));
   assert.equal(L.normKey("Song feat. X", "A & B"), L.normKey("Song", "A and B"));
-});
-
-await test("buildPool: ontdubbelt, behoudt volgorde en negeert rommel", () => {
-  const t = [{ name: "A", artist: "X" }, { name: "a (live)", artist: "x" }, null, { name: "", artist: "Q" }, { name: "B", artist: "Y" }];
-  assert.deepEqual(L.buildPool({ genreTracks: t }).map((c) => c.title), ["A", "B"]);
-  assert.deepEqual(L.buildPool({}), []);
 });
 
 await test("releaseYear en yearMatches", () => {
@@ -108,6 +101,41 @@ await test("formatDuration", () => {
 });
 
 // ---------------- PKCE ----------------
+await test("dataBuckets: blokken van 10 BPM die bpm ± marge afdekken", () => {
+  assert.deepEqual(L.dataBuckets(120, 0), [120]);
+  assert.deepEqual(L.dataBuckets(119, 2), [110, 120]);
+  assert.deepEqual(L.dataBuckets(125, 5), [120, 130]);
+  assert.deepEqual(L.dataBuckets(45, 5), [40]);
+  assert.deepEqual(L.dataBuckets(220, 5), [210]);
+});
+
+await test("genreIndexSet: alle woorden moeten in de tag voorkomen, leeg = geen filter", () => {
+  const names = ["rock", "dance pop", "pop dance", "indie pop", "hip hop"];
+  assert.equal(L.genreIndexSet(names, "  "), null);
+  assert.deepEqual([...L.genreIndexSet(names, "pop")], [1, 2, 3]);
+  assert.deepEqual([...L.genreIndexSet(names, "Dance Pop")], [1, 2]);
+  assert.deepEqual([...L.genreIndexSet(names, "HIP-HOP")], [4]);
+  assert.equal(L.genreIndexSet(names, "metal").size, 0);
+});
+
+await test("filterRows: tempo, jaar, genre, ontdubbeling en volgorde (populairste eerst)", () => {
+  const ID = (c) => c.repeat(22);
+  const rows = [
+    [ID("a"), "Song A", "Art 1", 120.2, 1985, 50, [1]],
+    [ID("b"), "Song B", "Art 2", 121.9, 1995, 80, [1, 2]],
+    [ID("c"), "Song C", "Art 3", 130, 1995, 99, [1]],   // tempo valt buiten de marge
+    [ID("d"), "Song D", "Art 4", 120, 2010, 70, [0]],   // ander genre
+    [ID("e"), "Song A (Remastered)", "Art 1", 120, 1985, 10, [1]], // dubbel van A
+    [ID("f"), "Song F", "Art 6", 119.8, 1970, 60, [1]],  // te oud
+    ["bad id", "Song G", "Art 7", 120, 1990, 90, [1]],   // ongeldige Spotify-ID
+  ];
+  const out = L.filterRows(rows, { bpm: 120, tol: 2, from: 1980, to: 2000, genreSet: new Set([1, 2]) });
+  assert.deepEqual(out.map((o) => o.title), ["Song B", "Song A"]);
+  assert.equal(out[0].uri, `spotify:track:${ID("b")}`);
+  assert.equal(out[0].bpm, 122);
+  assert.equal(L.filterRows(rows, { bpm: 120, tol: 2, from: 1950, to: 2026, genreSet: null }).length, 4);
+});
+
 await test("PKCE challenge klopt met RFC 7636 testvector", async () => {
   assert.equal(
     await challengeFor("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
@@ -116,179 +144,5 @@ await test("PKCE challenge klopt met RFC 7636 testvector", async () => {
 });
 
 // ---------------- proxy ----------------
-const calls = [];
-const store = new Map();
-globalThis.caches = {
-  default: {
-    async match(req) {
-      const hit = store.get(req.url);
-      return hit ? hit.clone() : undefined;
-    },
-    async put(req, res) {
-      store.set(req.url, res);
-    },
-  },
-};
-globalThis.fetch = async (url, init = {}) => {
-  const u = String(url);
-  calls.push({ url: u, init });
-  const ok = (body) => new Response(JSON.stringify(body), { status: 200 });
-  if (u.startsWith("https://api.reccobeats.com/v1/audio-features")) {
-    const ids = new URL(u).searchParams.get("ids").split(",");
-    // ID's die met 'z' beginnen kent ReccoBeats niet.
-    return ok({ content: ids.filter((i) => !i.startsWith("z")).map((i) => ({ id: "uuid-" + i, href: "https://open.spotify.com/track/" + i, tempo: 120.5 })) });
-  }
-  if (u.startsWith("https://ws.audioscrobbler.com/")) {
-    const method = new URL(u).searchParams.get("method");
-    return ok({ tracks: { track: [{ name: method, artist: { name: "R" } }, { bad: true }] } });
-  }
-  if (u.startsWith("https://api.deezer.com/search")) {
-    const q = new URL(u).searchParams.get("q");
-    if (q.includes("Boom")) return new Response("{}", { status: 500 });
-    if (q.includes("Known")) return ok({ data: [{ id: 77, title: "Known Song", artist: { name: "Some Artist" } }] });
-    if (q.includes("Zero")) return ok({ data: [{ id: 78, title: "Zero Song", artist: { name: "Some Artist" } }] });
-    if (q.includes("Cover")) return ok({ data: [{ id: 79, title: "Cover Song", artist: { name: "Other Band" } }] });
-    return ok({ data: [] });
-  }
-  if (u === "https://api.deezer.com/track/77") return ok({ id: 77, bpm: 128.4, release_date: "1999-05-21", isrc: "GBAAA9900001" });
-  if (u === "https://api.deezer.com/track/78") return ok({ id: 78, bpm: 0 });
-  return new Response("{}", { status: 500 });
-};
-
-const env = { LASTFM_KEY: "KEY_LFM" };
-const run = async (path, { headers = {}, e = env } = {}) => {
-  const pending = [];
-  const res = await onRequestGet({ request: new Request("https://site.test" + path, { headers }), env: e, waitUntil: (p) => pending.push(p) });
-  await Promise.all(pending);
-  return { res, body: await res.clone().json() };
-};
-const ID1 = "A".repeat(22), ID2 = "B".repeat(22), ID3 = "C".repeat(22), UNK = "z".repeat(22);
-
-await test("proxy: tempo geeft per Spotify-ID een tempo, null voor onbekend, zonder API-key", async () => {
-  const before = calls.length;
-  const { res, body } = await run(`/api/tempo?ids=${ID1},${ID2},${UNK}`);
-  assert.equal(res.status, 200);
-  assert.deepEqual(body.tempos, { [ID1]: 120.5, [ID2]: 120.5, [UNK]: null });
-  assert.equal(res.headers.get("cache-control"), "no-store");
-  assert.ok(!calls[before].init.headers || !("X-API-KEY" in calls[before].init.headers));
-});
-
-await test("proxy: tempo cachet per ID en vraagt alleen ontbrekende ID's op", async () => {
-  const n = calls.length;
-  const again = await run(`/api/tempo?ids=${ID1},${ID2},${ID3}`);
-  assert.equal(again.body.tempos[ID3], 120.5);
-  assert.equal(calls.length, n + 1, "één aanvraag, enkel voor het nieuwe ID");
-  assert.equal(new URL(calls[n].url).searchParams.get("ids"), ID3);
-  const n2 = calls.length;
-  await run(`/api/tempo?ids=${ID1},${ID2},${ID3},${UNK}`);
-  assert.equal(calls.length, n2, "alles uit de cache, ook het onbekende ID");
-});
-
-const q = (id, artist, title) => `ids=${id}&a=${encodeURIComponent(artist)}&t=${encodeURIComponent(title)}`;
-const Z1 = "z1".repeat(11), Z2 = "z2".repeat(11), Z3 = "z3".repeat(11), Z4 = "z4".repeat(11), Z5 = "z5".repeat(11);
-
-await test("proxy: Deezer vult aan als ReccoBeats een nummer niet kent; 0-BPM en andere artiest tellen niet", async () => {
-  const ids = [Z1, Z2, Z3];
-  const names = `ids=${ids.join(",")}&a=Some%20Artist&a=Some%20Artist&a=Other%20Band&t=Known%20Song&t=Zero%20Song&t=Cover%20Song`;
-  const { res, body } = await run(`/api/tempo?${names}`);
-  assert.equal(res.status, 200);
-  assert.equal(body.tempos[Z1], 128.4);
-  assert.equal(body.tempos[Z2], null, "Deezer-BPM 0 = onbekend");
-  const n = calls.length;
-  await run(`/api/tempo?${q(Z1, "Some Artist", "Known Song")}`);
-  assert.equal(calls.length, n, "Deezer-resultaat is gecachet");
-});
-
-await test("proxy: verkeerde artiest bij Deezer wordt genegeerd", async () => {
-  const { body } = await run(`/api/tempo?${q(Z4, "Totally Different", "Cover Song")}`);
-  assert.equal(body.tempos[Z4], null);
-});
-
-await test("proxy: ReccoBeats faalt (429) maar Deezer weet het: geen fout; Deezer faalt ook: fout", async () => {
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => (String(url).startsWith("https://api.reccobeats.com") ? new Response("{}", { status: 429 }) : realFetch(url, init));
-  const ok = await run(`/api/tempo?${q(Z5, "Some Artist", "Known Song")}`);
-  const bad = await run(`/api/tempo?${q("z6".repeat(11), "Some Artist", "Boom")}`);
-  const noNames = await run(`/api/tempo?ids=${"z7".repeat(11)}`);
-  globalThis.fetch = realFetch;
-  assert.equal(ok.res.status, 200);
-  assert.equal(ok.body.tempos[Z5], 128.4);
-  assert.equal(bad.res.status, 502);
-  assert.equal(noNames.res.status, 502);
-});
-
-await test("proxy: deezer geeft BPM, jaar en ISRC per nummer, in dezelfde volgorde; onbekend = niet gevonden", async () => {
-  const { res, body } = await run("/api/deezer?a=Some%20Artist&t=Known%20Song&a=Nobody&t=Unknown%20Thing&a=Some%20Artist&t=Zero%20Song");
-  assert.equal(res.status, 200);
-  assert.deepEqual(body.items[0], { ok: true, found: true, tempo: 128.4, year: 1999, isrc: "GBAAA9900001" });
-  assert.equal(body.items[1].found, false);
-  assert.equal(body.items[2].tempo, null, "BPM 0 = onbekend");
-  const n = calls.length;
-  await run("/api/deezer?a=Some%20Artist&t=Known%20Song");
-  assert.equal(calls.length, n, "gecachet");
-});
-
-await test("proxy: deezer valideert invoer en faalt als Deezer overal faalt", async () => {
-  assert.equal((await run("/api/deezer")).res.status, 400);
-  assert.equal((await run("/api/deezer?a=X&a=Y&t=Z")).res.status, 400);
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response("{}", { status: 500 });
-  const bad = await run("/api/deezer?a=Fresh%20Artist&t=Fresh%20Title");
-  globalThis.fetch = realFetch;
-  assert.equal(bad.res.status, 502);
-});
-
-await test("proxy: namen moeten even lang zijn als de ID's", async () => {
-  assert.equal((await run(`/api/tempo?ids=${ID1},${ID2}&a=X&t=Y`)).res.status, 400);
-});
-
-await test("proxy: invoer wordt gevalideerd", async () => {
-  const many = Array.from({ length: 21 }, (_, i) => String.fromCharCode(65 + i).repeat(22)).join(",");
-  const bad = [
-    "/api/tempo", "/api/tempo?ids=abc", `/api/tempo?ids=${ID1},../../x`, `/api/tempo?ids=${many}`,
-    "/api/lastfm?country=Belgium&page=9", "/api/lastfm?country=%3Cscript%3E&page=1",
-    "/api/lastfm-tag?tag=%3Cb%3E&page=1", "/api/lastfm-tag?tag=pop&page=0", "/api/chart?page=4",
-  ];
-  for (const p of bad) assert.equal((await run(p)).res.status, 400, p);
-  assert.equal((await run("/api/nope")).res.status, 404);
-  assert.equal((await run("/api/search?q=abc")).res.status, 404, "Spotify gaat niet meer via de proxy");
-  assert.equal((await run("/api/constructor")).res.status, 404, "geen prototype-lookup");
-});
-
-await test("proxy: Last.fm-routes (land, genre, wereldtop) filteren rommel en gebruiken de juiste methode", async () => {
-  assert.deepEqual((await run("/api/lastfm?country=Belgium&page=1")).body.tracks, [{ name: "geo.gettoptracks", artist: "R" }]);
-  assert.deepEqual((await run("/api/lastfm-tag?tag=hip-hop&page=2")).body.tracks, [{ name: "tag.gettoptracks", artist: "R" }]);
-  assert.deepEqual((await run("/api/chart?page=1")).body.tracks, [{ name: "chart.gettoptracks", artist: "R" }]);
-  const tagCall = calls.findLast((c) => c.url.includes("tag.gettoptracks"));
-  assert.equal(new URL(tagCall.url).searchParams.get("tag"), "hip-hop");
-});
-
-await test("proxy: vreemde websites in de browser worden geweigerd", async () => {
-  assert.equal((await run(`/api/tempo?ids=${ID1}`, { headers: { "Sec-Fetch-Site": "cross-site" } })).res.status, 403);
-  assert.equal((await run(`/api/tempo?ids=${ID1}`, { headers: { "Sec-Fetch-Site": "same-origin" } })).res.status, 200);
-});
-
-await test("proxy: ontbrekende key geeft duidelijke fout zonder waarden te lekken", async () => {
-  const { res, body } = await run("/api/chart?page=2", { e: { ...env, LASTFM_KEY: "" } });
-  assert.equal(res.status, 500);
-  assert.match(body.error, /LASTFM_KEY/);
-});
-
-await test("proxy: upstream-fout (429) wordt 502 en niet gecachet", async () => {
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response("{}", { status: 429 });
-  const tempo = await run(`/api/tempo?ids=${"D".repeat(22)}`);
-  const chart = await run("/api/chart?page=3");
-  globalThis.fetch = realFetch;
-  assert.equal(tempo.res.status, 502);
-  assert.match(tempo.body.error, /limiet/);
-  assert.equal(chart.res.status, 502);
-  assert.equal(store.has("https://site.test/api/chart?page=3"), false);
-  assert.equal(store.has(`https://cache.internal/tempo/${"D".repeat(22)}`), false);
-});
-
-await test("proxy: andere methoden geweigerd", () => {
-  assert.equal(onRequest().status, 405);
-});
 
 console.log(`\n${passed} tests geslaagd`);

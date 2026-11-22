@@ -4,9 +4,8 @@ import * as S from "./spotify.js";
 
 const $ = (id) => document.getElementById(id);
 const DRAFT_KEY = "bpm-playlist-draft-v1";
-const BATCH = 20; // kandidaten per ronde (ook max. aantal ID's per tempo-aanvraag)
-const FIRST_GOAL = 30;
-const MORE_GOAL = 25;
+const FIRST_SHOW = 30;
+const MORE_SHOW = 25;
 
 // ---------- kleine DOM-helper: gebruikt uitsluitend textContent, nooit innerHTML ----------
 function h(tag, props = {}, ...kids) {
@@ -38,77 +37,8 @@ function cover(url) {
   return src ? h("img", { class: "cover", src, alt: "", loading: "lazy", width: 44, height: 44 }) : h("div", { class: "cover" });
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-// ---------- netwerk ----------
-async function api(path, params = {}) {
-  const url = new URL(path, location.origin);
-  for (const [k, v] of Object.entries(params)) {
-    if (Array.isArray(v)) for (const x of v) url.searchParams.append(k, String(x));
-    else url.searchParams.set(k, String(v));
-  }
-  const res = await fetch(url, { headers: { accept: "application/json" } });
-  if (!res.ok) {
-    let msg = "";
-    try {
-      msg = (await res.json()).error;
-    } catch {}
-    throw new Error(msg || `Serverfout ${res.status}`);
-  }
-  return res.json();
-}
-
-async function pool(items, size, fn) {
-  const out = new Array(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const i = next++;
-      try {
-        out[i] = { ok: true, value: await fn(items[i], i) };
-      } catch (error) {
-        out[i] = { ok: false, error };
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker));
-  return out;
-}
-
-// ---------- bewaarde Spotify-zoekresultaten ----------
-// Onthoudt per nummer wat Spotify teruggaf (ook "geen match"), zodat herhaalde of hervatte zoekopdrachten
-// geen Spotify-aanvragen verspillen.
-const MATCH_KEY = "bpm-spotify-matches-v1";
-const MATCH_MAX = 3000;
-const matchCache = (() => {
-  try {
-    const d = JSON.parse(localStorage.getItem(MATCH_KEY) || "{}");
-    return d && typeof d === "object" && !Array.isArray(d) ? d : {};
-  } catch {
-    return {};
-  }
-})();
-
-function rememberMatch(key, best) {
-  const keys = Object.keys(matchCache);
-  if (keys.length >= MATCH_MAX) for (const k of keys.slice(0, 500)) delete matchCache[k];
-  matchCache[key] = best
-    ? { uri: best.uri, name: best.name, artists: best.artists.slice(0, 3), album: best.album, image: best.image, durationMs: best.durationMs, year: best.year }
-    : 0;
-  try {
-    localStorage.setItem(MATCH_KEY, JSON.stringify(matchCache));
-  } catch {}
-}
-
-function recalledMatch(key) {
-  if (!Object.hasOwn(matchCache, key)) return undefined;
-  const m = matchCache[key];
-  if (!m) return null;
-  return L.SPOTIFY_TRACK_URI.test(String(m.uri)) && Array.isArray(m.artists) ? m : undefined;
-}
-
 // ---------- staat ----------
-const state = { results: [], scan: null, scanId: 0, playlist: loadDraft(), dragFrom: -1 };
+const state = { all: [], shown: 0, results: [], playlist: loadDraft(), dragFrom: -1 };
 
 function loadDraft() {
   try {
@@ -174,49 +104,21 @@ function syncYears(moved) {
 
 const currentYears = () => [Number($("year-from").value), Number($("year-to").value)];
 
-// ---------- zoeken ----------
-// Stappen: (1) kandidaten uit Last.fm (land en/of genre), (2) per kandidaat het echte nummer op
-// Deezer vragen om BPM, jaar en ISRC (geen Spotify nodig), (3) alleen voor nummers die kloppen het echte nummer op Spotify zoeken.
-// Dat gebeurt in rondes van 20, zodat de eerste resultaten snel verschijnen.
-async function fetchLastfm(path, params, pages) {
-  const settled = await Promise.allSettled(Array.from({ length: pages }, (_, i) => api(path, { ...params, page: i + 1 })));
-  return settled.filter((r) => r.status === "fulfilled").flatMap((r) => r.value.tracks || []);
-}
-
-// Deezer opvragen met geduld bij tijdelijke fouten.
-const DEEZER_WAITS = [3, 8, 20];
-async function fetchDeezer(batch, onWait) {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const res = await api("/api/deezer", { a: batch.map((c) => c.artist), t: batch.map((c) => c.title) });
-      return Array.isArray(res.items) ? res.items : [];
-    } catch (err) {
-      if (attempt >= DEEZER_WAITS.length) throw err;
-      for (let left = DEEZER_WAITS[attempt]; left > 0; left--) {
-        onWait?.(left);
-        await sleep(1000);
-      }
-    }
+// ---------- zoeken in de lokale BPM-lijst ----------
+// De lijst staat als bestanden op deze site (public/data, per blok van 10 BPM) en is een bewerking van
+// "Almost a million Spotify tracks" (Zenodo, CC BY 4.0). Zoeken is dus een filter in de browser: geen
+// externe aanvragen, geen limieten. Spotify is alleen nog nodig om de playlist aan te maken.
+const dataCache = new Map();
+function loadData(name) {
+  if (!dataCache.has(name)) {
+    const p = fetch(new URL(`/data/${name}.json`, location.origin)).then((res) => {
+      if (!res.ok) throw new Error(`De lijst kon niet geladen worden (${name}, HTTP ${res.status}).`);
+      return res.json();
+    });
+    p.catch(() => dataCache.delete(name));
+    dataCache.set(name, p);
   }
-}
-
-// Zoekt het nummer op Spotify: eerst op ISRC (exact), anders op titel en artiest. Resultaten worden bewaard.
-async function findOnSpotify(token, c, d) {
-  const key = L.normKey(c.title, c.artist);
-  const recalled = recalledMatch(key);
-  if (recalled !== undefined) return recalled;
-  let best = null;
-  if (d.isrc) {
-    const byIsrc = await S.searchTracks(token, `isrc:${d.isrc}`);
-    best = byIsrc[0] || null;
-  }
-  if (!best) {
-    let tracks = await S.searchTracks(token, L.buildSearchQuery({ title: c.title, artist: c.artist }));
-    if (!tracks.length) tracks = await S.searchTracks(token, L.buildSearchQuery({ q: `${c.artist} ${c.title}` }));
-    best = L.pickBestMatch(tracks, c);
-  }
-  rememberMatch(key, best);
-  return best;
+  return dataCache.get(name);
 }
 
 async function onSearch(ev) {
@@ -225,167 +127,46 @@ async function onSearch(ev) {
   if (!Number.isFinite(bpm) || bpm < L.MIN_BPM || bpm > L.MAX_BPM) {
     return setStatus(`Kies een BPM tussen ${L.MIN_BPM} en ${L.MAX_BPM}.`, "error");
   }
-  if (!S.getToken()) {
-    updateConnection();
-    return setStatus("Verbind eerst met Spotify (knop hierboven). Zonder verbinding kan de site de nummers niet op Spotify zoeken.", "error");
-  }
   const tol = Number($("tol").value);
   const genre = $("genre").value.trim().slice(0, 40);
-  if (!genre) return setStatus("Kies een genre (bv. pop, rock, dance).", "error");
-  const [yearFrom, yearTo] = currentYears();
-
-  const id = ++state.scanId;
-  state.scan = null;
-  state.results = [];
-  renderResults();
+  const [from, to] = currentYears();
   $("search-btn").disabled = true;
+  setStatus("Zoeken…");
   try {
-    setStatus(`Populaire nummers in het genre "${genre}" ophalen…`);
-    const genreTracks = await fetchLastfm("/api/lastfm-tag", { tag: genre }, 10);
-    if (!genreTracks.length) throw new Error("Last.fm gaf geen nummers terug voor dit genre. Controleer de spelling of probeer een ander genre.");
-    const candidates = L.buildPool({ genreTracks });
-    state.scan = { id, candidates, index: 0, bpm, tol, yearFrom, yearTo, found: [], keys: new Set(), running: false, paused: "", failedBatches: 0, searchErrors: 0, outOfYears: 0, onSpotify: 0, withTempo: 0, noMatch: 0, sample: "", lastSearchError: "", dzErrors: 0, notOnDeezer: 0, noBpm: 0, hitsTotal: 0 };
-    await continueScan(FIRST_GOAL);
+    const [names, ...shards] = await Promise.all([loadData("genres"), ...L.dataBuckets(bpm, tol).map((b) => loadData(`bpm-${b}`))]);
+    const genreSet = L.genreIndexSet(names, genre);
+    state.all = [];
+    state.shown = 0;
+    state.results = [];
+    if (genreSet && genreSet.size === 0) {
+      setStatus(`Geen genre gevonden dat bij "${genre}" past. Probeer bv. pop, rock, hip hop, edm, jazz of laat het veld leeg.`, "error");
+      return;
+    }
+    state.all = L.filterRows(shards.flat(), { bpm, tol, from, to, genreSet });
+    state.shown = Math.min(FIRST_SHOW, state.all.length);
+    state.results = state.all.slice(0, state.shown);
+    setStatus(
+      state.all.length
+        ? `${state.all.length} nummers gevonden${state.shown < state.all.length ? `, de ${state.shown} populairste getoond` : ""}.`
+        : "0 nummers gevonden. Probeer een grotere marge, een breder jaarbereik of een ander genre.",
+      state.all.length ? "" : "error",
+    );
   } catch (err) {
     setStatus(`Zoeken mislukt: ${err.message}`, "error");
   } finally {
     $("search-btn").disabled = false;
+    renderResults();
   }
 }
 
-// Laat zien waar nummers afvallen: handig om te zien welke stap weinig oplevert.
-function breakdown(scan) {
-  const onDeezer = scan.index - scan.notOnDeezer - scan.dzErrors;
-  const parts = [`op Deezer gevonden: ${onDeezer}`, `met BPM: ${scan.withTempo}`, `binnen BPM en jaar: ${scan.hitsTotal}`, `op Spotify: ${scan.onSpotify}`];
-  if (scan.noBpm) parts.push(`zonder BPM bij Deezer: ${scan.noBpm}`);
-  if (scan.noMatch) parts.push(`niet op Spotify: ${scan.noMatch}`);
-  if (scan.searchErrors) parts.push(`Spotify-fouten: ${scan.searchErrors} (laatste: ${scan.lastSearchError})`);
-  return parts.join(", ");
-}
-
-async function continueScan(extra) {
-  const scan = state.scan;
-  if (!scan || scan.running) return;
-  scan.running = true;
-  scan.paused = "";
-  scan.stopped = false;
-  $("search-btn").disabled = true;
-  $("more-btn").disabled = true;
-  $("stop-btn").hidden = false;
-  $("results-head").hidden = false;
-  const goal = scan.found.length + extra;
-  try {
-    while (!scan.stopped && scan.found.length < goal && scan.index < scan.candidates.length && scan.id === state.scanId) {
-      const batch = scan.candidates.slice(scan.index, scan.index + BATCH);
-      scan.index += batch.length;
-      setStatus(`Zoeken… ${scan.index} van ${scan.candidates.length} nummers gecontroleerd · ${scan.found.length} gevonden · ${breakdown(scan)}`);
-
-      // Stap 1: Deezer geeft BPM, jaar en ISRC voor de hele groep. Dit kost geen Spotify-aanvragen.
-      let info;
-      try {
-        info = await fetchDeezer(batch, (left) => {
-          if (scan.id === state.scanId) setStatus(`Deezer reageert niet. Nieuwe poging over ${left} s… · ${scan.found.length} gevonden`);
-        });
-      } catch (err) {
-        scan.index -= batch.length;
-        scan.paused = `Deezer blijft fouten geven (${err.message})`;
-        break;
-      }
-      if (scan.id !== state.scanId) return;
-      const hits = [];
-      batch.forEach((c, i) => {
-        const d = info[i];
-        if (!d?.ok) return void scan.dzErrors++;
-        if (!d.found) return void scan.notOnDeezer++;
-        if (d.tempo == null) return void scan.noBpm++;
-        scan.withTempo++;
-        if (!L.tempoMatches(d.tempo, scan.bpm, scan.tol)) return;
-        if (d.year != null && !L.yearMatches(d.year, scan.yearFrom, scan.yearTo)) return void scan.outOfYears++;
-        scan.hitsTotal++;
-        hits.push({ c, d });
-      });
-      if (!hits.length) continue;
-
-      // Stap 2: Spotify alleen voor de nummers die al kloppen (voor de link en de export).
-      const token = S.getToken();
-      if (!token) throw new S.SpotifyAuthError("Je Spotify-verbinding is verlopen. Verbind opnieuw met Spotify.");
-      let limited = null;
-      for (const { c, d } of hits) {
-        let best;
-        try {
-          best = await findOnSpotify(token, c, d);
-        } catch (err) {
-          if (err instanceof S.SpotifyAuthError) throw err;
-          if (err instanceof S.SpotifyRateLimitError) {
-            limited = err;
-            break;
-          }
-          scan.searchErrors++;
-          scan.lastSearchError = err.message;
-          continue;
-        }
-        if (scan.id !== state.scanId) return;
-        if (!best) {
-          scan.noMatch++;
-          continue;
-        }
-        scan.onSpotify++;
-        const year = d.year ?? best.year;
-        if (!L.yearMatches(year, scan.yearFrom, scan.yearTo)) {
-          scan.outOfYears++;
-          continue;
-        }
-        const title = best.name;
-        const artist = best.artists[0] || c.artist;
-        const key = L.normKey(title, artist);
-        if (scan.keys.has(key)) continue;
-        scan.keys.add(key);
-        scan.found.push({ key, title, artist, bpm: Math.round(d.tempo), uri: best.uri, image: safeImage(best.image), durationMs: best.durationMs, year });
-      }
-      if (limited) {
-        // Wat al gevonden is blijft staan; Deezer-antwoorden en Spotify-zoekresultaten zijn bewaard, hervatten gaat snel.
-        scan.index -= batch.length;
-        scan.paused = limited.message;
-        state.results = scan.found;
-        renderResults();
-        break;
-      }
-      state.results = scan.found;
-      renderResults();
-    }
-  } catch (err) {
-    if (scan.id === state.scanId) {
-      setStatus(`Zoeken mislukt: ${err.message}`, "error");
-      updateConnection();
-    }
-    return;
-  } finally {
-    scan.running = false;
-    $("stop-btn").hidden = true;
-    if (scan.id === state.scanId) {
-      $("search-btn").disabled = false;
-      $("more-btn").disabled = false;
-      renderResults();
-    }
-  }
-  if (scan.id !== state.scanId) return;
-
-  const exhausted = scan.index >= scan.candidates.length;
-  if (scan.paused) {
-    return setStatus(`Gepauzeerd: ${scan.paused} ${scan.found.length} nummers gevonden tot nu toe. Wacht een paar minuten en klik op "Meer zoeken" om verder te gaan (reeds gecontroleerde nummers worden onthouden). · ${breakdown(scan)}`, "error");
-  }
-  if (scan.stopped) return setStatus(`Gestopt · ${scan.found.length} nummers gevonden · ${scan.index} van ${scan.candidates.length} gecontroleerd. Klik op "Meer zoeken" om verder te gaan. · ${breakdown(scan)}`);
-  const parts = [`${scan.found.length} nummers gevonden`];
-  parts.push(exhausted ? "alle kandidaten zijn gecontroleerd" : `${scan.index} van ${scan.candidates.length} gecontroleerd, klik op "Meer zoeken" voor meer`);
-  if (!scan.found.length && exhausted) parts.push("probeer een grotere marge, een breder jaarbereik of een ander genre");
-  if (scan.failedBatches) parts.push("een deel kon niet gecontroleerd worden (de tempo-dienst reageerde niet)");
-  if (scan.searchErrors) parts.push(`${scan.searchErrors} zoekopdrachten bij Spotify mislukten`);
-  parts.push(breakdown(scan));
-  setStatus(parts.join(" · "), scan.found.length ? "" : "error");
+function showMore() {
+  state.shown = Math.min(state.shown + MORE_SHOW, state.all.length);
+  state.results = state.all.slice(0, state.shown);
+  setStatus(`${state.all.length} nummers gevonden, ${state.shown} getoond.`);
+  renderResults();
 }
 
 function renderResults() {
-  const scan = state.scan;
   $("results").replaceChildren(
     ...state.results.map((c) => {
       const inList = state.playlist.items.some((i) => i.key === c.key);
@@ -399,9 +180,9 @@ function renderResults() {
       );
     }),
   );
-  $("results-head").hidden = state.results.length === 0 && !(scan && scan.index < scan.candidates.length);
+  $("results-head").hidden = state.results.length === 0;
   $("add-top").disabled = state.results.length === 0;
-  $("more-btn").hidden = !(scan && scan.index < scan.candidates.length);
+  $("more-btn").hidden = state.shown >= state.all.length;
 }
 
 function addCandidate(c) {
@@ -473,7 +254,8 @@ function renderPlaylist() {
   );
 
   const parts = [`${items.length} nummers`];
-  if (items.length) parts.push(L.formatDuration(items.reduce((s, i) => s + i.durationMs, 0)));
+  const totalMs = items.reduce((sum, i) => sum + i.durationMs, 0);
+  if (items.length && totalMs > 0) parts.push(L.formatDuration(totalMs));
   $("pl-summary").textContent = items.length ? parts.join(" · ") : "Nog geen nummers. Voeg ze toe via de zoekresultaten of zoek er zelf een.";
   if (state.results.length) renderResults();
 }
@@ -609,10 +391,7 @@ function init() {
   $("manual-form").addEventListener("submit", onManualSearch);
   $("export-btn").addEventListener("click", onExport);
   $("csv-btn").addEventListener("click", downloadCsv);
-  $("more-btn").addEventListener("click", () => continueScan(MORE_GOAL));
-  $("stop-btn").addEventListener("click", () => {
-    if (state.scan?.running) state.scan.stopped = true;
-  });
+  $("more-btn").addEventListener("click", showMore);
   $("connect-btn").addEventListener("click", connectToSpotify);
   $("disconnect-btn").addEventListener("click", disconnectSpotify);
   $("pl-name").addEventListener("input", (e) => {
@@ -628,9 +407,6 @@ function init() {
   });
   $("clear-btn").addEventListener("click", () => {
     if (state.playlist.items.length && confirm("Alle nummers uit de lijst verwijderen?")) updateItems([]);
-  });
-  S.onRateLimitWait((secs) => {
-    if (state.scan?.running) setStatus(`Spotify vraagt om te vertragen, nieuwe poging over ${secs} s… · ${state.scan.found.length} gevonden · ${breakdown(state.scan)}`);
   });
   renderPlaylist();
   updateConnection();

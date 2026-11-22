@@ -20,10 +20,10 @@
       <details open>
         <summary id="h-help">Hoe zet ik mijn playlist in Spotify?</summary>
         <ol>
-          <li><strong>Verbind met Spotify.</strong> Klik op <em>Verbind met Spotify</em>, log in bij Spotify en klik op <em>Akkoord</em>. Je wachtwoord blijft bij Spotify en deze site bewaart niets op een server. Dit hoeft eenmalig per bezoek.</li>
-          <li><strong>Zoek nummers.</strong> Vul je BPM, een genre in en kies met de twee schuiven vanaf en tot welk jaar de nummers uitgebracht mogen zijn, en klik op <em>Zoek nummers</em>. Dit kan even duren, de eerste resultaten verschijnen snel.</li>
-          <li><strong>Bouw je lijst.</strong> Klik op <em>Toevoegen</em> bij de nummers die je wilt (of <em>Voeg de eerste 25 toe</em>). Pas daarna de volgorde aan door te slepen of te sorteren, en voeg zelf nummers toe via <em>Zoek op Spotify</em>.</li>
+          <li><strong>Zoek nummers.</strong> Vul je BPM in, kies eventueel een genre (bv. pop, rock, edm) en met de twee schuiven vanaf en tot welk jaar de nummers uitgebracht mogen zijn. Klik op <em>Zoek nummers</em>. De populairste nummers staan bovenaan.</li>
+          <li><strong>Bouw je lijst.</strong> Klik op <em>Toevoegen</em> bij de nummers die je wilt (of <em>Voeg de eerste 25 toe</em>). Pas daarna de volgorde aan door te slepen of te sorteren. Zelf een nummer toevoegen kan via <em>Zoek op Spotify</em>.</li>
           <li><strong>Geef de playlist een naam</strong> bij <em>Jouw playlist</em>.</li>
+          <li><strong>Verbind met Spotify.</strong> Klik op <em>Verbind met Spotify</em>, log in bij Spotify en klik op <em>Akkoord</em>. Je wachtwoord blijft bij Spotify en deze site bewaart niets op een server. Dit is alleen nodig om te exporteren (of zelf op Spotify te zoeken).</li>
           <li><strong>Klik op <em>Exporteer naar Spotify</em>.</strong> Je krijgt een knop <em>Open in Spotify</em>. De playlist staat dan in <em>Jouw bibliotheek</em> in Spotify en is privé tot je hem zelf deelt.</li>
         </ol>
         <p class="small muted"><strong>Foutmelding of geen toegang (403)?</strong> Deze site mag alleen exporteren voor personen die de beheerder bij Spotify heeft toegevoegd. Vraag de beheerder om je Spotify-e-mailadres toe te voegen.</p>
@@ -35,6 +35,7 @@
       <h2 id="h-find">1. Nummers zoeken</h2>
       <div id="connect-bar" class="connect">
         <span id="connect-state">Niet verbonden met Spotify</span>
+        <span class="small muted">Alleen nodig om te exporteren.</span>
         <button type="button" id="connect-btn" class="primary">Verbind met Spotify</button>
         <button type="button" id="disconnect-btn" class="ghost" hidden>Verbinding verbreken</button>
       </div>
@@ -51,8 +52,8 @@
             <option value="5">± 5</option>
           </select>
         </label>
-        <label>Genre
-          <input id="genre" type="text" list="genres" maxlength="40" placeholder="bv. dance, pop, hip hop" autocomplete="off" required>
+        <label>Genre <span class="opt">(optioneel)</span>
+          <input id="genre" type="text" list="genres" maxlength="40" placeholder="bv. dance, pop, hip hop (leeg = alles)" autocomplete="off">
           <datalist id="genres">
             <option value="pop"><option value="rock"><option value="dance"><option value="electronic">
             <option value="house"><option value="techno"><option value="hip hop"><option value="r&b">
@@ -73,8 +74,7 @@
       <p id="status" role="status" aria-live="polite"></p>
       <div id="results-head" hidden>
         <button type="button" id="add-top" class="ghost">Voeg de eerste 25 toe</button>
-        <button type="button" id="more-btn" class="ghost" hidden>Meer zoeken</button>
-        <button type="button" id="stop-btn" class="ghost" hidden>Stop</button>
+        <button type="button" id="more-btn" class="ghost" hidden>Meer tonen</button>
       </div>
       <ul id="results" class="list"></ul>
     </section>
@@ -120,8 +120,7 @@
 
   <footer>
     <p>
-      Tempo (BPM) en jaar via <a href="https://www.deezer.com" target="_blank" rel="noopener">Deezer</a> ·
-      Populaire nummers per genre via <a href="https://www.last.fm" target="_blank" rel="noopener">Last.fm</a> ·
+      Nummerlijst met BPM, genre en jaar: <a href="https://zenodo.org/records/11453410" target="_blank" rel="noopener">Almost a million Spotify tracks</a> (Zenodo, licentie CC BY 4.0), bewerkt en ingekort voor deze site. Tempo's zijn schattingen.
       Nummers en export via Spotify. Deze site heeft geen accounts en slaat niets van je op op een server.
     </p>
   </footer>

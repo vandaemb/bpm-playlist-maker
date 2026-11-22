@@ -1,3 +1,0 @@
-# Kopieer naar .dev.vars voor lokaal testen (staat in .gitignore). NOOIT committen.
-
-LASTFM_KEY=

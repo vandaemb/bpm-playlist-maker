@@ -57,14 +57,7 @@ export function yearMatches(year, from, to) {
   return year >= lo && year <= hi;
 }
 
-/** Kandidatenlijst uit de Last.fm-top van het genre: ontdubbeld, in populariteitsvolgorde. */
-export function buildPool({ genreTracks = [] }) {
-  return dedupeBy(
-    genreTracks.filter((t) => t && t.name && t.artist).map((t) => ({ title: t.name, artist: t.artist })),
-    (c) => normKey(c.title, c.artist),
-  );
-}
-
+const SPOTIFY_ID = /^[A-Za-z0-9]{22}$/;
 export const SPOTIFY_TRACK_URI = /^spotify:track:[A-Za-z0-9]{22}$/;
 
 export function spotifyIdFromUri(uri) {
@@ -178,4 +171,54 @@ export function toCsv(items) {
     rows.push([t.title, t.artist, t.bpm ?? "", id ? `https://open.spotify.com/track/${id}` : ""]);
   }
   return rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
+}
+
+
+// ---------- lokale BPM-lijst (public/data) ----------
+export const DATA_BUCKET = 10;
+export const DATA_MIN = 40;
+export const DATA_MAX = 210;
+
+/** Bestanden (begin van elk blok van 10 BPM) die nodig zijn voor bpm ± tol. */
+export function dataBuckets(bpm, tol) {
+  const lo = Math.max(DATA_MIN, Math.floor((bpm - tol) / DATA_BUCKET) * DATA_BUCKET);
+  const hi = Math.min(DATA_MAX, Math.floor((bpm + tol) / DATA_BUCKET) * DATA_BUCKET);
+  const out = [];
+  for (let b = lo; b <= hi; b += DATA_BUCKET) out.push(b);
+  return out;
+}
+
+/**
+ * Welke genre-tags (indexen in genres.json) passen bij wat de gebruiker typte?
+ * Elk woord moet in de tag voorkomen ("dance pop" past bij "dance pop" en "pop dance pop").
+ * Leeg = geen filter (null). Geen enkele tag = lege set.
+ */
+export function genreIndexSet(names, query) {
+  const words = normText(query).split(" ").filter(Boolean);
+  if (!words.length) return null;
+  const set = new Set();
+  names.forEach((name, i) => {
+    const n = normText(name);
+    if (words.every((w) => n.includes(w))) set.add(i);
+  });
+  return set;
+}
+
+/**
+ * Filtert rijen [id, titel, artiest, bpm, jaar, populariteit, [genre-indexen]] op tempo, jaar en genre.
+ * Sorteert op populariteit (hoogste eerst), daarna op afstand tot het gevraagde tempo.
+ */
+export function filterRows(rows, { bpm, tol, from, to, genreSet }) {
+  const out = [];
+  const seen = new Set();
+  for (const r of rows) {
+    const [id, title, artist, tempo, year, popularity, genres] = r;
+    if (!SPOTIFY_ID.test(String(id)) || !tempoMatches(tempo, bpm, tol) || !yearMatches(year, from, to)) continue;
+    if (genreSet && !genres.some((g) => genreSet.has(g))) continue;
+    const key = normKey(title, artist);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, title, artist, bpm: Math.round(tempo), year, popularity, uri: `spotify:track:${id}`, image: "", durationMs: 0, distance: Math.abs(tempo - bpm) });
+  }
+  return out.sort((a, b) => b.popularity - a.popularity || a.distance - b.distance);
 }
