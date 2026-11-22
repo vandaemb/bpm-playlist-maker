@@ -3,6 +3,7 @@ import { t, apply, setLang } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
 const DRAFT_KEY = "bpm-playlist-draft-v1";
+const MAX_ADD_ALL = 1000;
 const FIRST_SHOW = 30;
 const MORE_SHOW = 25;
 
@@ -185,15 +186,16 @@ function renderResults() {
   );
   $("results-head").hidden = state.results.length === 0;
   $("add-top").disabled = state.results.length === 0;
+  $("add-all").disabled = state.all.length === 0;
   $("more-btn").hidden = state.shown >= state.all.length;
 }
 
-function addCandidate(c) {
-  addToPlaylist({ title: c.title, artist: c.artist, bpm: c.bpm, uri: c.uri, image: c.image, durationMs: c.durationMs });
+function addCandidate(c, quiet = false) {
+  return addToPlaylist({ title: c.title, artist: c.artist, bpm: c.bpm, uri: c.uri, image: c.image, durationMs: c.durationMs }, quiet);
 }
 
 // ---------- playlist ----------
-function addToPlaylist(t) {
+function addToPlaylist(t, quiet = false) {
   if (!L.SPOTIFY_TRACK_URI.test(String(t.uri))) return false;
   const key = L.normKey(t.title, t.artist);
   if (state.playlist.items.some((i) => i.key === key)) return false;
@@ -206,8 +208,10 @@ function addToPlaylist(t) {
     image: safeImage(t.image),
     durationMs: t.durationMs || 0,
   });
-  renderPlaylist();
-  saveDraft();
+  if (!quiet) {
+    renderPlaylist();
+    saveDraft();
+  }
   return true;
 }
 
@@ -369,6 +373,13 @@ function init() {
   });
   $("add-top").addEventListener("click", () => {
     for (const c of state.results.slice(0, 25)) addCandidate(c);
+  });
+  $("add-all").addEventListener("click", () => {
+    let added = 0;
+    for (const c of state.all.slice(0, MAX_ADD_ALL)) if (addCandidate(c, true)) added++;
+    renderPlaylist();
+    saveDraft();
+    setStatus("st.addedAll", "", { n: added });
   });
   $("clear-btn").addEventListener("click", () => {
     if (state.playlist.items.length && confirm(t("confirm.clear"))) updateItems([]);

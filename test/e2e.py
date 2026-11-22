@@ -160,6 +160,15 @@ with sync_playwright() as p:
     pg.reload()
     pg.wait_for_selector("#pl-list .row")
     assert pg.locator("#pl-list .row").count() == 25, "draft hersteld"
+
+    # alles toevoegen
+    pg.evaluate("window.confirm = () => true")
+    pg.click("#clear-btn")
+    search(pg, genre="hip hop", tol="1")
+    total = int(pg.inner_text("#status").split()[0])
+    pg.click("#add-all")
+    assert pg.locator("#pl-list .row").count() == min(total, 1000), (total, pg.locator("#pl-list .row").count())
+    assert "toegevoegd" in pg.inner_text("#status")
     b.close()
 print("page errors:", errors)
 print("csp:", csp)

@@ -100,6 +100,8 @@ const D = {
     "demo.s6": "6. Alle nummers verschijnen. Geef de lijst een naam. Klaar!",
     "coffee.text": "Vind je de site handig? Hij is gratis. Een kleine bijdrage helpt om hem draaiende te houden.",
     "coffee.link": "Trakteer me op een koffie",
+    "results.addAll": "Voeg alle nummers toe",
+    "st.addedAll": "{n} nummers toegevoegd aan je playlist (maximaal 1000 tegelijk).",
   },
   en: {
     "bpm.lo": "Minimum BPM",
@@ -196,6 +198,8 @@ const D = {
     "demo.s6": "6. All tracks appear. Give the list a name. Done!",
     "coffee.text": "Do you find this site useful? It is free. A small contribution helps keep it running.",
     "coffee.link": "Buy me a coffee",
+    "results.addAll": "Add all tracks",
+    "st.addedAll": "{n} tracks added to your playlist (maximum 1000 at once).",
   },
   fr: {
     "bpm.lo": "BPM minimum",
@@ -292,6 +296,8 @@ const D = {
     "demo.s6": "6. Tous les titres apparaissent. Donne un nom à la liste. Terminé !",
     "coffee.text": "Tu trouves ce site utile ? Il est gratuit. Une petite contribution aide à le maintenir en ligne.",
     "coffee.link": "Offre-moi un café",
+    "results.addAll": "Ajouter tous les titres",
+    "st.addedAll": "{n} titres ajoutés à ta playlist (maximum 1000 à la fois).",
   },
   de: {
     "bpm.lo": "Minimales BPM",
@@ -388,6 +394,8 @@ const D = {
     "demo.s6": "6. Alle Titel erscheinen. Gib der Liste einen Namen. Fertig!",
     "coffee.text": "Findest du die Seite nützlich? Sie ist kostenlos. Ein kleiner Beitrag hilft, sie am Laufen zu halten.",
     "coffee.link": "Spendier mir einen Kaffee",
+    "results.addAll": "Alle Titel hinzufügen",
+    "st.addedAll": "{n} Titel zu deiner Playlist hinzugefügt (maximal 1000 auf einmal).",
   },
 };
 
