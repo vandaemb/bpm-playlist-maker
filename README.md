@@ -71,3 +71,7 @@ python3 test/e2e-export.py    # browsertest: Spotify-redirect (PKCE), verbonden 
 ## Geen Spotify-koppeling meer
 
 De export naar Spotify, de Spotify-login en het zelf zoeken op Spotify zijn verwijderd (de Spotify-app in dev-modus laat maar 5 gebruikers toe). De playlist wordt gedownload als CSV met per nummer een Spotify-link. De site doet geen enkele externe aanvraag meer (CSP: `connect-src 'self'`). Het Spotify Client ID en de Spotify-app in het Dashboard zijn niet meer nodig. De FAQ legt uit hoe je de CSV in Spotify zet en dat diensten zoals TuneMyMusic of Soundiiz lijsten naar andere streamingdiensten kunnen overzetten. Boven de FAQ staat een korte animatie (alleen CSS) die de stappen toont.
+
+## Alles in één keer naar Spotify
+
+De knop "Kopieer Spotify-links" zet alle links onder elkaar op het klembord. Plakken (Ctrl+V / ⌘+V) in een lege afspeellijst in de Spotify-app op de computer voegt de nummers toe. Dit gedrag is niet door ons getest tegen de echte Spotify-app; de CSV blijft als terugval. De animatie boven de FAQ toont de zes stappen.

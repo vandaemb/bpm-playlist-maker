@@ -282,6 +282,17 @@ function renderExport() {
   );
 }
 
+async function copyLinks() {
+  const ids = state.playlist.items.map((i) => L.spotifyIdFromUri(i.uri)).filter(Boolean);
+  if (!ids.length) return showExport("error", "exp.emptyCsv");
+  try {
+    await navigator.clipboard.writeText(ids.map((id) => `https://open.spotify.com/track/${id}`).join("\n"));
+    showExport("ok", "copy.done", { n: ids.length });
+  } catch {
+    showExport("error", "copy.fail");
+  }
+}
+
 function downloadCsv() {
   const items = state.playlist.items;
   if (!items.length) return showExport("error", "exp.emptyCsv");
@@ -359,6 +370,7 @@ function init() {
   $("pl-name").value = state.playlist.name;
   $("search-form").addEventListener("submit", onSearch);
   $("csv-btn").addEventListener("click", downloadCsv);
+  $("copy-btn").addEventListener("click", copyLinks);
   $("more-btn").addEventListener("click", showMore);
   $("pl-name").addEventListener("input", (e) => {
     state.playlist.name = e.target.value.slice(0, 100);

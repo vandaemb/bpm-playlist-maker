@@ -69,7 +69,7 @@ with sync_playwright() as p:
     pg = b.new_context(locale="nl-BE").new_page()
     watch(pg)
     pg.goto("http://127.0.0.1:8799/")
-    assert pg.locator(".demo .scene").count() == 4 and pg.locator("#connect-btn, #export-btn, #manual-form").count() == 0
+    assert pg.locator(".demo .scene").count() == 6 and pg.locator("#connect-btn, #export-btn, #manual-form").count() == 0
 
     # jaarschuiven: "van" duwt "tot" mee en omgekeerd
     pg.evaluate("document.getElementById('filters').open = true")
@@ -147,6 +147,11 @@ with sync_playwright() as p:
     pg.locator("#pl-list .row").nth(2).drag_to(pg.locator("#pl-list .row").nth(0))
     assert pg.locator("#results button:disabled").count() >= 25
 
+    pg.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    pg.click("#copy-btn")
+    wait_until(lambda: "25 links" in pg.inner_text("#export-result"))
+    clip = pg.evaluate("navigator.clipboard.readText()").splitlines()
+    assert len(clip) == 25 and all(l.startswith("https://open.spotify.com/track/") for l in clip), clip[:2]
     with pg.expect_download() as dl:
         pg.click("#csv-btn")
     csv = open(dl.value.path(), encoding="utf-8-sig").read()
