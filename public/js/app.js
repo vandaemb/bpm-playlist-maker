@@ -1,6 +1,4 @@
-import { CONFIG } from "./config.js";
 import * as L from "./logic.js";
-import * as S from "./spotify.js";
 import { t, apply, setLang, getLang, allValues } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
@@ -265,50 +263,6 @@ function renderPlaylist() {
   if (state.results.length) renderResults();
 }
 
-// ---------- handmatig toevoegen ----------
-async function onManualSearch(ev) {
-  ev.preventDefault();
-  const q = $("manual-q").value.trim();
-  const box = $("manual-results");
-  if (!q) return;
-  box.replaceChildren(h("li", { class: "muted" }, t("manual.searching")));
-  try {
-    const token = S.getToken();
-    if (!token) {
-      updateConnection();
-      throw new Error(t("exp.connectFirst"));
-    }
-    const valid = await S.searchTracks(token, L.buildSearchQuery({ q }));
-    box.replaceChildren(
-      ...(valid.length
-        ? valid.map((tr) =>
-            h(
-              "li",
-              { class: "row" },
-              cover(tr.image),
-              h("div", { class: "meta" }, h("strong", {}, tr.name), h("span", {}, `${tr.artists.join(", ")} · ${tr.album}`)),
-              h(
-                "button",
-                {
-                  type: "button",
-                  class: "ghost",
-                  onclick: () => {
-                    addToPlaylist({ title: tr.name, artist: tr.artists[0] || "", bpm: null, uri: tr.uri, image: tr.image, durationMs: tr.durationMs });
-                    box.replaceChildren();
-                    $("manual-q").value = "";
-                  },
-                },
-                t("results.add"),
-              ),
-            ),
-          )
-        : [h("li", { class: "muted" }, t("manual.none"))]),
-    );
-  } catch (err) {
-    box.replaceChildren(h("li", { class: "msg error" }, t("manual.failed", { msg: err.message })));
-  }
-}
-
 // ---------- export ----------
 let lastExport = null;
 function showExport(kind, key, params = {}, link = "") {
@@ -326,62 +280,6 @@ function renderExport() {
   box.replaceChildren(
     h("div", { class: `msg ${kind}` }, raw ?? t(key, params), link ? [" ", h("a", { href: link, target: "_blank", rel: "noopener" }, t("exp.open"))] : null),
   );
-}
-
-const redirectUri = () => location.origin + location.pathname;
-
-function connectToSpotify() {
-  if (!CONFIG.SPOTIFY_CLIENT_ID || CONFIG.SPOTIFY_CLIENT_ID.startsWith("VUL_")) {
-    return setStatus("err.clientId", "error");
-  }
-  S.startLogin(CONFIG.SPOTIFY_CLIENT_ID, redirectUri()).catch((err) => setStatusRaw(err.message, "error"));
-}
-
-function disconnectSpotify() {
-  S.clearToken();
-  updateConnection();
-  setStatus("st.disconnected");
-}
-
-function updateConnection() {
-  const connected = Boolean(S.getToken());
-  $("connect-state").textContent = t(connected ? "conn.on" : "conn.off");
-  $("connect-state").className = connected ? "connected" : "";
-  $("connect-btn").hidden = connected;
-  $("disconnect-btn").hidden = !connected;
-}
-
-async function onExport() {
-  const items = state.playlist.items;
-  if (!items.length) return showExport("error", "exp.empty");
-  const token = S.getToken();
-  if (!token) {
-    return showExport("error", "exp.connectFirst");
-  }
-  $("export-btn").disabled = true;
-  showExport("", "exp.creating");
-  try {
-    const res = await S.exportPlaylist(token, { name: state.playlist.name || t("pl.defaultName"), uris: items.map((i) => i.uri) });
-    const safeLink = res.url.startsWith("https://open.spotify.com/") ? res.url : "";
-    showExport("ok", "exp.done", { n: res.count }, safeLink);
-  } catch (err) {
-    showExportRaw("error", err.message);
-    updateConnection();
-  } finally {
-    $("export-btn").disabled = false;
-  }
-}
-
-async function finishLoginIfReturning() {
-  const params = new URLSearchParams(location.search);
-  if (!params.has("code") && !params.has("error")) return;
-  try {
-    await S.completeLogin(CONFIG.SPOTIFY_CLIENT_ID, redirectUri());
-    setStatus("st.connected");
-  } catch (err) {
-    setStatusRaw(err.message, "error");
-  }
-  updateConnection();
 }
 
 function downloadCsv() {
@@ -410,7 +308,6 @@ function rerender() {
   renderExport();
   renderPlaylist();
   renderResults();
-  updateConnection();
 }
 
 const bpmRange = () => [Number($("bpm-lo").value), Number($("bpm-hi").value)];
@@ -461,12 +358,8 @@ function init() {
   if (!state.playlist.name) state.playlist.name = t("pl.defaultName");
   $("pl-name").value = state.playlist.name;
   $("search-form").addEventListener("submit", onSearch);
-  $("manual-form").addEventListener("submit", onManualSearch);
-  $("export-btn").addEventListener("click", onExport);
   $("csv-btn").addEventListener("click", downloadCsv);
   $("more-btn").addEventListener("click", showMore);
-  $("connect-btn").addEventListener("click", connectToSpotify);
-  $("disconnect-btn").addEventListener("click", disconnectSpotify);
   $("pl-name").addEventListener("input", (e) => {
     state.playlist.name = e.target.value.slice(0, 100);
     saveDraft();
@@ -483,8 +376,6 @@ function init() {
   });
   apply();
   renderPlaylist();
-  updateConnection();
-  finishLoginIfReturning();
 }
 
 init();

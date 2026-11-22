@@ -102,25 +102,22 @@
       <ol id="pl-list" class="list"></ol>
       <p class="muted small" data-i18n="pl.dragHint"></p>
 
-      <form id="manual-form" class="inline">
-        <label class="grow"><span data-i18n="manual.label">Zelf een nummer toevoegen</span>
-          <input id="manual-q" type="search" maxlength="100" data-i18n-placeholder="manual.placeholder" placeholder="Titel en/of artiest" autocomplete="off">
-        </label>
-        <button type="submit" class="ghost" data-i18n="manual.btn">Zoek op Spotify</button>
-      </form>
-      <ul id="manual-results" class="list"></ul>
-
-      <div id="connect-bar" class="connect">
-        <span id="connect-state" data-i18n="conn.off">Niet verbonden met Spotify</span>
-        <button type="button" id="connect-btn" class="ghost" data-i18n="conn.connect">Verbind met Spotify</button>
-        <button type="button" id="disconnect-btn" class="ghost" hidden data-i18n="conn.disconnect">Verbinding verbreken</button>
-      </div>
       <div class="actions">
-        <button type="button" id="export-btn" class="primary" data-i18n="export">Exporteer naar Spotify</button>
-        <button type="button" id="csv-btn" class="ghost" data-i18n="csv">Download als CSV</button>
+        <button type="button" id="csv-btn" class="primary" data-i18n="csv">Download als CSV</button>
         <button type="button" id="clear-btn" class="ghost danger" data-i18n="clear">Lijst leegmaken</button>
       </div>
       <div id="export-result" role="status" aria-live="polite"></div>
+      <p class="muted small" data-i18n="csv.hint"></p>
+    </section>
+
+    <section class="demo" aria-labelledby="h-demo">
+      <h2 id="h-demo" data-i18n="demo.title">CSV in Spotify zetten</h2>
+      <div class="screen" role="img" data-i18n-aria="demo.aria" aria-label="Animation">
+        <div class="scene s1"><div class="mock"><div class="file">playlist.csv</div><div class="btn-mock">CSV</div></div><p data-i18n="demo.s1"></p></div>
+        <div class="scene s2"><div class="mock"><div class="line">Track 1 &middot; Artist <span class="link">open.spotify.com/track/…</span></div><div class="line dim">Track 2 &middot; Artist</div></div><p data-i18n="demo.s2"></p></div>
+        <div class="scene s3"><div class="mock"><div class="line">Track 1 <span class="dots">&bull;&bull;&bull;</span></div><div class="menu">+ Playlist</div></div><p data-i18n="demo.s3"></p></div>
+        <div class="scene s4"><div class="mock"><div class="line pick">&#9835; My BPM playlist</div><div class="line dim">&#9835; Other playlist</div></div><p data-i18n="demo.s4"></p></div>
+      </div>
     </section>
 
     <section class="faq" aria-labelledby="h-faq">
@@ -137,8 +134,8 @@
         <p data-i18n="faq.a2b"></p>
       </details>
       <details><summary data-i18n="faq.q3"></summary><p data-i18n="faq.a3"></p></details>
-      <details><summary data-i18n="faq.q4"></summary><p data-i18n="faq.a4"></p></details>
       <details><summary data-i18n="faq.q5"></summary><p data-i18n="faq.a5"></p></details>
+      <details><summary data-i18n="faq.q7"></summary><p data-i18n="faq.a7"></p></details>
       <details><summary data-i18n="faq.q6"></summary><p data-i18n="faq.a6"></p></details>
     </section>
   </main>

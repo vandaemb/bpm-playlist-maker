@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import * as L from "../public/js/logic.js";
-import { challengeFor } from "../public/js/spotify.js";
 
 let passed = 0;
 const test = async (name, fn) => {
@@ -171,12 +170,6 @@ await test("filterRows: nummers zonder jaartal (0) alleen bij volledig open jaar
   assert.equal(L.filterRows(rows, { bpm: 120, tol: 1, from: 1980, to: now, genreSet: null }).length, 0);
 });
 
-await test("PKCE challenge klopt met RFC 7636 testvector", async () => {
-  assert.equal(
-    await challengeFor("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
-    "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
-  );
-});
 
 // ---------------- proxy ----------------
 

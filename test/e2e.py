@@ -4,8 +4,6 @@ import unicodedata
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
-import spotify_mock
 
 errors, csp = [], []
 
@@ -61,25 +59,17 @@ with sync_playwright() as p:
     pg = b.new_context(locale="nl-BE").new_page()
     watch(pg)
     pg.goto("http://127.0.0.1:8799/")
-    assert pg.inner_text("#connect-state") == "Niet verbonden met Spotify"
-    assert pg.is_visible("#connect-btn") and not pg.is_visible("#disconnect-btn")
     assert pg.input_value("#year-from") == "1950" and pg.input_value("#year-to") == pg.get_attribute("#year-to", "max")
     res = search(pg)
     print("status:", pg.inner_text("#status"))
     assert res, "resultaten zonder verbinding"
-    # export zonder verbinding: duidelijke melding
-    pg.click("#add-top")
-    pg.click("#export-btn")
-    assert "Verbind eerst met Spotify" in pg.inner_text("#export-result")
     pg.close()
 
     # B. verbonden: volledige flow
     pg = b.new_context(locale="nl-BE").new_page()
     watch(pg)
-    pg.add_init_script(spotify_mock.TOKEN_SCRIPT)
-    spotify_mock.install(pg)
     pg.goto("http://127.0.0.1:8799/")
-    assert pg.inner_text("#connect-state") == "Verbonden met Spotify"
+    assert pg.locator(".demo .scene").count() == 4 and pg.locator("#connect-btn, #export-btn, #manual-form").count() == 0
 
     # jaarschuiven: "van" duwt "tot" mee en omgekeerd
     pg.evaluate("document.getElementById('filters').open = true")
@@ -157,21 +147,14 @@ with sync_playwright() as p:
     pg.locator("#pl-list .row").nth(2).drag_to(pg.locator("#pl-list .row").nth(0))
     assert pg.locator("#results button:disabled").count() >= 25
 
-    pg.fill("#manual-q", "Eigen Nummer")
-    pg.click("#manual-form button")
-    pg.wait_for_selector("#manual-results .row")
-    pg.click("#manual-results .row button")
-    assert pg.locator("#pl-list .row").count() == 26
+    with pg.expect_download() as dl:
+        pg.click("#csv-btn")
+    csv = open(dl.value.path(), encoding="utf-8-sig").read()
+    assert csv.splitlines()[0].replace(chr(34), "") == "Titel,Artiest,BPM,Spotify-link" and len(csv.splitlines()) == 26, csv[:80]
 
     pg.reload()
     pg.wait_for_selector("#pl-list .row")
-    assert pg.locator("#pl-list .row").count() == 26, "draft hersteld"
-    assert "spotify_token" not in pg.evaluate("JSON.stringify(localStorage)"), "token niet in localStorage"
-
-    # C. verbinding verbreken
-    pg.click("#disconnect-btn")
-    assert pg.inner_text("#connect-state") == "Niet verbonden met Spotify"
-    assert pg.evaluate("sessionStorage.getItem('spotify_token')") is None
+    assert pg.locator("#pl-list .row").count() == 25, "draft hersteld"
     b.close()
 print("page errors:", errors)
 print("csp:", csp)

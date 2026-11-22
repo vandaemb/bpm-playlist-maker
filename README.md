@@ -67,3 +67,7 @@ python3 test/e2e-export.py    # browsertest: Spotify-redirect (PKCE), verbonden 
 ## Tweede bron
 
 `tools/build-data.py tracks.csv bsddataset.csv` voegt "Spotify Tracks Dataset" (maharshipandya, BSD) toe aan de Zenodo-lijst, ontdubbeld op Spotify-ID en titel+artiest. Die bron heeft geen jaartal; die nummers (jaar 0) verschijnen alleen als het jaarbereik volledig open staat. Samen: ~150.000 nummers.
+
+## Geen Spotify-koppeling meer
+
+De export naar Spotify, de Spotify-login en het zelf zoeken op Spotify zijn verwijderd (de Spotify-app in dev-modus laat maar 5 gebruikers toe). De playlist wordt gedownload als CSV met per nummer een Spotify-link. De site doet geen enkele externe aanvraag meer (CSP: `connect-src 'self'`). Het Spotify Client ID en de Spotify-app in het Dashboard zijn niet meer nodig. De FAQ legt uit hoe je de CSV in Spotify zet en dat diensten zoals TuneMyMusic of Soundiiz lijsten naar andere streamingdiensten kunnen overzetten. Boven de FAQ staat een korte animatie (alleen CSS) die de stappen toont.
