@@ -30,9 +30,13 @@
     <section class="card" aria-label="BPM">
       <form id="search-form" novalidate>
         <div class="tempo">
-          <button type="button" id="bpm-dec" class="round" data-i18n-aria="bpm.dec" aria-label="-">&minus;</button>
-          <label class="bpm-box"><input id="bpm" type="number" min="40" max="220" value="150" inputmode="numeric" required><span data-i18n="bpm.label">Tempo (BPM)</span></label>
-          <button type="button" id="bpm-inc" class="round" data-i18n-aria="bpm.inc" aria-label="+">+</button>
+          <div class="bpm-big"><span id="bpm-label">145 – 155</span><small data-i18n="bpm.label">Tempo (BPM)</small></div>
+          <div class="dual" id="dual">
+            <div class="track"></div>
+            <input id="bpm-lo" type="range" min="40" max="220" step="1" value="145" data-i18n-aria="bpm.lo" aria-label="min BPM">
+            <input id="bpm-hi" type="range" min="40" max="220" step="1" value="155" data-i18n-aria="bpm.hi" aria-label="max BPM">
+          </div>
+          <p class="hint" data-i18n="bpm.hint"></p>
         </div>
         <div class="chips" id="presets">
           <button type="button" class="chip" data-bpm="110" data-i18n="preset.walk">Wandelen</button>
@@ -42,18 +46,8 @@
           <button type="button" class="chip" data-bpm="95" data-i18n="preset.cool">Cooldown</button>
         </div>
 
-        <details class="filters" id="filters">
-          <summary data-i18n="filters.summary">Meer filters</summary>
-          <div class="grid">
-            <label><span data-i18n="tol.label">Marge</span>
-              <select id="tol">
-                <option value="0" data-i18n="tol.exact">exact</option>
-                <option value="1">&plusmn; 1</option>
-                <option value="2" selected>&plusmn; 2</option>
-                <option value="3">&plusmn; 3</option>
-                <option value="5">&plusmn; 5</option>
-              </select>
-            </label>
+        <div class="filters" id="filters">
+          <div class="grid one">
             <label><span><span data-i18n="genre.label">Genre</span> <span class="opt">(<span data-i18n="genre.opt">optioneel</span>)</span></span>
               <input id="genre" type="text" list="genres" maxlength="60" data-i18n-placeholder="genre.placeholder" placeholder="pop, rock -metal" autocomplete="off">
               <datalist id="genres">
@@ -73,7 +67,7 @@
               <label><span data-i18n="years.to">Tot</span> <input id="year-to" type="range" step="1" min="1950" max="2026" value="2026"></label>
             </div>
           </div>
-        </details>
+        </div>
 
         <button type="submit" id="search-btn" class="primary big" data-i18n="search">Zoek nummers</button>
         <p class="note" data-i18n="note.dataset"></p>

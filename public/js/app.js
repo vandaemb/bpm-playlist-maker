@@ -133,11 +133,9 @@ function loadData(name) {
 
 async function onSearch(ev) {
   ev.preventDefault();
-  const bpm = Number($("bpm").value);
-  if (!Number.isFinite(bpm) || bpm < L.MIN_BPM || bpm > L.MAX_BPM) {
-    return setStatus("st.bpmRange", "error", { min: L.MIN_BPM, max: L.MAX_BPM });
-  }
-  const tol = Number($("tol").value);
+  const [lo, hi] = bpmRange();
+  const bpm = (lo + hi) / 2;
+  const tol = (hi - lo) / 2;
   const genre = $("genre").value.trim().slice(0, 60);
   const [from, to] = currentYears();
   $("search-btn").disabled = true;
@@ -152,7 +150,7 @@ async function onSearch(ev) {
       setStatus("st.noGenre", "error", { genre });
       return;
     }
-    state.all = L.filterRows(shards.flat(), { bpm, tol, from, to, genreSet, excludeSet });
+    state.all = L.filterRows(shards.flat(), { bpm, tol, lo, hi, from, to, genreSet, excludeSet });
     state.shown = Math.min(FIRST_SHOW, state.all.length);
     state.results = state.all.slice(0, state.shown);
     if (!state.all.length) setStatus("st.none", "error");
@@ -415,26 +413,45 @@ function rerender() {
   updateConnection();
 }
 
+const bpmRange = () => [Number($("bpm-lo").value), Number($("bpm-hi").value)];
+
+// Twee handvatten op één schuif: de gekleurde band is het gekozen tempobereik (dus de marge).
 function setupTempo() {
-  const bpm = $("bpm");
-  const mark = () => {
-    for (const c of document.querySelectorAll("#presets .chip")) c.setAttribute("aria-pressed", String(Number(c.dataset.bpm) === Number(bpm.value)));
+  const lo = $("bpm-lo");
+  const hi = $("bpm-hi");
+  const min = Number(lo.min);
+  const max = Number(lo.max);
+  const draw = (moved) => {
+    let a = Number(lo.value);
+    let b = Number(hi.value);
+    if (a > b) {
+      if (moved === "lo") b = a;
+      else a = b;
+      lo.value = String(a);
+      hi.value = String(b);
+    }
+    $("dual").style.setProperty("--lo", `${((a - min) / (max - min)) * 100}%`);
+    $("dual").style.setProperty("--hi", `${((b - min) / (max - min)) * 100}%`);
+    $("bpm-label").textContent = a === b ? `${a}` : `${a} – ${b}`;
+    for (const c of document.querySelectorAll("#presets .chip")) {
+      const m = Number(c.dataset.bpm);
+      c.setAttribute("aria-pressed", String(a === m - 3 && b === m + 3));
+    }
+    // het handvat dat het laatst bewogen is, komt bovenaan zodat beide bereikbaar blijven
+    if (moved === "lo") { lo.style.zIndex = "2"; hi.style.zIndex = "1"; }
+    if (moved === "hi") { hi.style.zIndex = "2"; lo.style.zIndex = "1"; }
   };
-  const step = (d) => {
-    const v = Math.min(L.MAX_BPM, Math.max(L.MIN_BPM, (Number(bpm.value) || 120) + d));
-    bpm.value = String(v);
-    mark();
-  };
-  $("bpm-dec").addEventListener("click", () => step(-1));
-  $("bpm-inc").addEventListener("click", () => step(1));
-  bpm.addEventListener("input", mark);
+  lo.addEventListener("input", () => draw("lo"));
+  hi.addEventListener("input", () => draw("hi"));
   for (const c of document.querySelectorAll("#presets .chip")) {
     c.addEventListener("click", () => {
-      bpm.value = c.dataset.bpm;
-      mark();
+      const m = Number(c.dataset.bpm);
+      lo.value = String(Math.max(min, m - 3));
+      hi.value = String(Math.min(max, m + 3));
+      draw();
     });
   }
-  mark();
+  draw();
 }
 
 function init() {

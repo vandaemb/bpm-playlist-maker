@@ -6,6 +6,9 @@ const STORE = "bpm-lang";
 
 const D = {
   nl: {
+    "bpm.lo": "Minimum BPM",
+    "bpm.hi": "Maximum BPM",
+    "bpm.hint": "Sleep de twee handvatten: de band is je tempobereik.",
     "app.name": "BPM Playlist",
     "hero.title": "Loop op het ritme.",
     "hero.sub": "Kies je tempo en krijg een playlist voor joggen, wandelen of sporten.",
@@ -121,6 +124,9 @@ const D = {
     "footer.post": "(Zenodo, licentie CC BY 4.0), bewerkt en ingekort voor deze site. Nummers en export via Spotify. Geen accounts, niets van je wordt op een server bewaard.",
   },
   en: {
+    "bpm.lo": "Minimum BPM",
+    "bpm.hi": "Maximum BPM",
+    "bpm.hint": "Drag the two handles: the coloured band is your tempo range.",
     "app.name": "BPM Playlist",
     "hero.title": "Run to the beat.",
     "hero.sub": "Pick your tempo and get a playlist for jogging, walking or working out.",
@@ -236,6 +242,9 @@ const D = {
     "footer.post": "(Zenodo, CC BY 4.0 licence), edited and shortened for this site. Tracks and export via Spotify. No accounts, nothing about you is stored on a server.",
   },
   fr: {
+    "bpm.lo": "BPM minimum",
+    "bpm.hi": "BPM maximum",
+    "bpm.hint": "Fais glisser les deux poignées : la bande colorée est ta plage de tempo.",
     "app.name": "BPM Playlist",
     "hero.title": "Cours au rythme.",
     "hero.sub": "Choisis ton tempo et obtiens une playlist pour le jogging, la marche ou le sport.",
@@ -351,6 +360,9 @@ const D = {
     "footer.post": "(Zenodo, licence CC BY 4.0), modifiée et raccourcie pour ce site. Titres et export via Spotify. Pas de comptes, rien n'est stocké sur un serveur.",
   },
   de: {
+    "bpm.lo": "Minimales BPM",
+    "bpm.hi": "Maximales BPM",
+    "bpm.hint": "Ziehe die beiden Griffe: das farbige Band ist dein Tempobereich.",
     "app.name": "BPM Playlist",
     "hero.title": "Lauf im Takt.",
     "hero.sub": "Wähle dein Tempo und erhalte eine Playlist zum Joggen, Gehen oder für den Sport.",

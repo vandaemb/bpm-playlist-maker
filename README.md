@@ -59,7 +59,7 @@ python3 test/e2e-export.py    # browsertest: Spotify-redirect (PKCE), verbonden 
 
 ## Interface, talen en genre-operators
 
-- **Stijl**: minimalistisch (Apple-achtig), gericht op joggen/sporten: groot BPM-getal met min/plus, snelkeuzes (wandelen, joggen, lopen, sprint, cooldown), extra filters ingeklapt, FAQ onderaan. Logo: `public/logo.svg` (ook favicon).
+- **Stijl**: minimalistisch (Apple-achtig), gericht op joggen/sporten: groot BPM-bereik met één schuif met twee handvatten (de band = het tempobereik, dus de marge), snelkeuzes (wandelen, joggen, lopen, sprint, cooldown), genre en jaren altijd zichtbaar, FAQ onderaan. Logo: `public/logo.svg` (ook favicon).
 - **Talen (NL/EN/FR/DE)**: alle teksten staan in `public/js/i18n.js`. Knoppen bovenaan wisselen meteen van taal, zonder pagina te herladen (keuze wordt onthouden). Een taal toevoegen = een blok in dat bestand + de taalcode in `LANGS` + een knop in `index.html`. `node test/run.mjs` controleert dat elke taal dezelfde sleutels heeft.
 - **Genreveld**: `pop, rock` = pop of rock, `dance pop` = beide woorden in dezelfde tag, `pop -rap` (of `pop not rap`) = pop zonder rap. Staat uitgelegd in de FAQ.
 - De dataset loopt tot en met 2024; dit staat bij de zoekknop, in de FAQ en hierboven.

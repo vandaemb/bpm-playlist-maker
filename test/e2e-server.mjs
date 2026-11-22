@@ -11,7 +11,7 @@ for (const line of headersFile.split("\n").slice(1)) {
   if (!m) break; // alleen het eerste blok (/*)
   secHeaders[m[1]] = m[2];
 }
-const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json" };
+const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml" };
 
 http
   .createServer((req, res) => {

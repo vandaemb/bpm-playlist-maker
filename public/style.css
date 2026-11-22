@@ -156,3 +156,18 @@ footer a { color: inherit; }
   .row .tools { grid-column: 2 / -1; }
   .bpm-box input { font-size: 3.4rem; }
 }
+
+.bpm-big { text-align: center; display: flex; flex-direction: column; align-items: center; }
+.bpm-big span { font-size: clamp(2.6rem, 11vw, 4rem); font-weight: 700; letter-spacing: -0.04em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.bpm-big small { color: var(--muted); font-size: 0.85rem; }
+.tempo { flex-direction: column; align-items: stretch; gap: 10px; }
+.hint { margin: 0; text-align: center; font-size: 0.8rem; color: var(--muted); }
+.dual { position: relative; height: 36px; --lo: 0%; --hi: 100%; }
+.dual .track { position: absolute; left: 0; right: 0; top: 15px; height: 6px; border-radius: 3px; background: var(--fill); }
+.dual .track::after { content: ""; position: absolute; top: 0; bottom: 0; left: var(--lo); right: calc(100% - var(--hi)); background: var(--accent); border-radius: 3px; }
+.dual input[type="range"] { position: absolute; left: 0; width: 100%; top: 0; height: 36px; margin: 0; background: none; pointer-events: none; -webkit-appearance: none; appearance: none; }
+.dual input[type="range"]::-webkit-slider-runnable-track { background: transparent; height: 36px; }
+.dual input[type="range"]::-moz-range-track { background: transparent; }
+.dual input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; pointer-events: auto; width: 28px; height: 28px; margin-top: 4px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 1px 5px rgba(0,0,0,.35); cursor: grab; }
+.dual input[type="range"]::-moz-range-thumb { pointer-events: auto; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 1px 5px rgba(0,0,0,.35); cursor: grab; }
+.grid.one { grid-template-columns: 1fr; }

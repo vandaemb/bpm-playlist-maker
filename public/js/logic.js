@@ -246,12 +246,12 @@ export function genreIndexSet(names, query) {
  * Filtert rijen [id, titel, artiest, bpm, jaar, populariteit, [genre-indexen]] op tempo, jaar en genre.
  * Sorteert op populariteit (hoogste eerst), daarna op afstand tot het gevraagde tempo.
  */
-export function filterRows(rows, { bpm, tol, from, to, genreSet, excludeSet }) {
+export function filterRows(rows, { bpm, tol, lo, hi, from, to, genreSet, excludeSet }) {
   const out = [];
   const seen = new Set();
   for (const r of rows) {
     const [id, title, artist, tempo, year, popularity, genres] = r;
-    if (!SPOTIFY_ID.test(String(id)) || !tempoMatches(tempo, bpm, tol) || !yearMatches(year, from, to)) continue;
+    if (!SPOTIFY_ID.test(String(id)) || !(lo != null ? Math.round(tempo) >= lo && Math.round(tempo) <= hi : tempoMatches(tempo, bpm, tol)) || !yearMatches(year, from, to)) continue;
     if (genreSet && !genres.some((g) => genreSet.has(g))) continue;
     if (excludeSet && excludeSet.size && genres.some((g) => excludeSet.has(g))) continue;
     const key = normKey(title, artist);

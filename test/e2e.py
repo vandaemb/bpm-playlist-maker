@@ -27,8 +27,8 @@ def titles(pg, sel):
 
 def search(pg, genre="pop", y_from="1950", y_to="2026", bpm="120", tol="2"):
     pg.evaluate("document.getElementById('filters').open = true")
-    pg.fill("#bpm", bpm)
-    pg.select_option("#tol", tol)
+    b, t_ = int(bpm), int(tol)
+    pg.evaluate("([a, c]) => { const lo = document.getElementById('bpm-lo'), hi = document.getElementById('bpm-hi'); lo.value = 40; hi.value = 220; lo.value = a; hi.value = c; lo.dispatchEvent(new Event('input')); hi.dispatchEvent(new Event('input')); }", [b - t_, b + t_])
     pg.fill("#genre", genre)
     pg.fill("#year-from", y_from)
     pg.fill("#year-to", y_to if y_to != "2026" else pg.get_attribute("#year-to", "max"))
