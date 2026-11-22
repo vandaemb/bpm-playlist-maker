@@ -164,6 +164,13 @@ await test("vertalingen: elke taal heeft dezelfde sleutels en dezelfde {paramete
   }
 });
 
+await test("filterRows: nummers zonder jaartal (0) alleen bij volledig open jaarbereik", () => {
+  const rows = [["a".repeat(22), "Song", "Art", 120, 0, 50, [0]]];
+  const now = new Date().getFullYear();
+  assert.equal(L.filterRows(rows, { bpm: 120, tol: 1, from: 1950, to: now, genreSet: null }).length, 1);
+  assert.equal(L.filterRows(rows, { bpm: 120, tol: 1, from: 1980, to: now, genreSet: null }).length, 0);
+});
+
 await test("PKCE challenge klopt met RFC 7636 testvector", async () => {
   assert.equal(
     await challengeFor("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),

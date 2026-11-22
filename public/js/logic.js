@@ -251,7 +251,7 @@ export function filterRows(rows, { bpm, tol, lo, hi, from, to, genreSet, exclude
   const seen = new Set();
   for (const r of rows) {
     const [id, title, artist, tempo, year, popularity, genres] = r;
-    if (!SPOTIFY_ID.test(String(id)) || !(lo != null ? Math.round(tempo) >= lo && Math.round(tempo) <= hi : tempoMatches(tempo, bpm, tol)) || !yearMatches(year, from, to)) continue;
+    if (!SPOTIFY_ID.test(String(id)) || !(lo != null ? Math.round(tempo) >= lo && Math.round(tempo) <= hi : tempoMatches(tempo, bpm, tol)) || !(year ? yearMatches(year, from, to) : from <= MIN_YEAR && to >= new Date().getFullYear())) continue;
     if (genreSet && !genres.some((g) => genreSet.has(g))) continue;
     if (excludeSet && excludeSet.size && genres.some((g) => excludeSet.has(g))) continue;
     const key = normKey(title, artist);

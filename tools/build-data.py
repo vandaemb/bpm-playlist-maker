@@ -2,7 +2,10 @@
 """Bouwt de BPM-bestanden voor de site uit tracks.csv van
 "Almost a million Spotify tracks" (Zenodo, CC BY 4.0): https://zenodo.org/records/11453410
 
-Gebruik:  python3 tools/build-data.py pad/naar/tracks.csv
+Gebruik:  python3 tools/build-data.py pad/naar/tracks.csv [pad/naar/bsddataset.csv]
+
+Het tweede (optionele) bestand is "Spotify Tracks Dataset" van maharshipandya (BSD-licentie). Die heeft geen jaartal:
+de nummers daaruit krijgen jaar 0 en verschijnen alleen als het jaarbereik volledig open staat.
 
 Schrijft naar public/data/:
   bpm-<N>.json   nummers met een tempo van N t/m N+9 (N = 40, 50, ...), [id, titel, artiest, bpm, jaar, populariteit, genres]
@@ -15,7 +18,7 @@ from collections import Counter
 
 import pandas as pd
 
-if len(sys.argv) != 2:
+if len(sys.argv) not in (2, 3):
     sys.exit(__doc__)
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "public", "data")
@@ -51,6 +54,27 @@ for r in df.itertuples():
     counts.update(tags)
     rows.append((r.track_id, r.name.strip(), str(r.track_artists).strip(), round(float(r.tempo), 1), int(r.year), r.popularity, tags))
 
+seen_ids = {r[0] for r in rows}
+seen_keys = set(df["key"])
+extra = 0
+if len(sys.argv) == 3:
+    bsd = pd.read_csv(sys.argv[2])
+    bsd = bsd.dropna(subset=["track_id", "track_name", "artists", "tempo", "track_genre"])
+    bsd = bsd[(bsd.tempo >= 40) & (bsd.tempo < 220) & bsd.track_id.astype(str).str.fullmatch(r"[A-Za-z0-9]{22}")]
+    bsd = bsd.sort_values("popularity", ascending=False)
+    for r in bsd.itertuples():
+        artist = ", ".join(a.strip() for a in str(r.artists).split(";") if a.strip())
+        key = norm(r.track_name) + "|" + norm(artist)
+        if r.track_id in seen_ids or key in seen_keys or not artist:
+            continue
+        seen_ids.add(r.track_id)
+        seen_keys.add(key)
+        tag = str(r.track_genre).replace("-", " ").strip()
+        counts.update([tag])
+        rows.append((r.track_id, str(r.track_name).strip(), artist, round(float(r.tempo), 1), 0, int(r.popularity), [tag]))
+        extra += 1
+    print(extra, "nummers erbij uit", sys.argv[2])
+
 names = [t for t, _ in counts.most_common()]
 index = {t: i for i, t in enumerate(names)}
 buckets = {}
@@ -73,7 +97,7 @@ with open(os.path.join(OUT, "meta.json"), "w", encoding="utf-8") as fh:
             "tracks": len(rows),
             "genres": len(names),
             "top_genres": names[:60],
-            "source": "Almost a million Spotify tracks (Zenodo, CC BY 4.0)",
+            "source": "Almost a million Spotify tracks (Zenodo, CC BY 4.0)" + (" + Spotify Tracks Dataset (maharshipandya, BSD)" if extra else ""),
             "source_url": "https://zenodo.org/records/11453410",
         },
         fh,

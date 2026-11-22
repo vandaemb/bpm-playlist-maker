@@ -63,3 +63,7 @@ python3 test/e2e-export.py    # browsertest: Spotify-redirect (PKCE), verbonden 
 - **Talen (NL/EN/FR/DE)**: alle teksten staan in `public/js/i18n.js`. Knoppen bovenaan wisselen meteen van taal, zonder pagina te herladen (keuze wordt onthouden). Een taal toevoegen = een blok in dat bestand + de taalcode in `LANGS` + een knop in `index.html`. `node test/run.mjs` controleert dat elke taal dezelfde sleutels heeft.
 - **Genreveld**: `pop, rock` = pop of rock, `dance pop` = beide woorden in dezelfde tag, `pop -rap` (of `pop not rap`) = pop zonder rap. Staat uitgelegd in de FAQ.
 - De dataset loopt tot en met 2024; dit staat bij de zoekknop, in de FAQ en hierboven.
+
+## Tweede bron
+
+`tools/build-data.py tracks.csv bsddataset.csv` voegt "Spotify Tracks Dataset" (maharshipandya, BSD) toe aan de Zenodo-lijst, ontdubbeld op Spotify-ID en titel+artiest. Die bron heeft geen jaartal; die nummers (jaar 0) verschijnen alleen als het jaarbereik volledig open staat. Samen: ~150.000 nummers.
