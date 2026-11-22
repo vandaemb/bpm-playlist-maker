@@ -67,6 +67,18 @@ with sync_playwright() as p:
     assert res == [] and "403" in status and "Premium" in status
     pg.close()
 
+    # B2. Spotify zegt kort "429": de site wacht, probeert opnieuw en vindt daarna gewoon nummers
+    pg = b.new_page()
+    watch(pg)
+    pg.add_init_script(spotify_mock.TOKEN_SCRIPT)
+    spotify_mock.install_limited(pg, fail_first=1)
+    pg.goto("http://127.0.0.1:8799/")
+    t0 = time.time()
+    res = search(pg, y_from="1950", y_to="1999")
+    print("na 429:", res, round(time.time() - t0, 1), "s")
+    assert sorted(res) == ["Belgian Banger", "Intl Pop", "Pop Hit"], res
+    pg.close()
+
     # C. verbonden: volledige flow
     pg = b.new_page()
     watch(pg)

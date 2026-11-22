@@ -40,3 +40,26 @@ def install(page, mode="ok", log=None):
 
 
 TOKEN_SCRIPT = "sessionStorage.setItem('spotify_token', JSON.stringify({value:'TESTTOKEN', expires: Date.now()+3600000}))"
+
+
+def install_limited(page, fail_first=3, log=None):
+    """Zoeken geeft de eerste `fail_first` keer 429 (zonder leesbare Retry-After), daarna normaal."""
+    log = log if log is not None else []
+    state = {"n": 0}
+    base = {}
+
+    def search(route):
+        req = route.request
+        if req.method == "OPTIONS":
+            return route.fulfill(status=204, headers=CORS)
+        state["n"] += 1
+        log.append(state["n"])
+        if state["n"] <= fail_first:
+            return route.fulfill(status=429, headers=CORS, content_type="application/json", body="{}")
+        return base["ok"](route)
+
+    install(page, log=[])  # normale handler registreren
+    # De laatst geregistreerde route wint in Playwright: daarom de beperkte handler erna zetten.
+    base["ok"] = lambda r: r.fallback()
+    page.route("https://api.spotify.com/v1/search**", search)
+    return log

@@ -17,6 +17,9 @@ const TRACK_URI = /^spotify:track:[A-Za-z0-9]{22}$/;
 /** Fout waarbij opnieuw proberen niets helpt (verlopen verbinding of geen toegang). */
 export class SpotifyAuthError extends Error {}
 
+/** Spotify zegt (blijvend) dat we te snel gaan: de zoekopdracht pauzeert en kan later hervat worden. */
+export class SpotifyRateLimitError extends Error {}
+
 function b64url(bytes) {
   let s = "";
   for (const b of bytes) s += String.fromCharCode(b);
@@ -119,14 +122,46 @@ const FORBIDDEN_MESSAGE =
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function spotifyFetch(token, path, init = {}) {
-  for (let attempt = 0; attempt < 4; attempt++) {
+// Spotify geeft apps in development mode een erg lage limiet. We zoeken daarom rustig (vaste pauze tussen
+// zoekopdrachten) en een 429 zet alle volgende aanvragen even stil (gedeelde afkoelperiode).
+const SEARCH_GAP_MS = 600;
+const BACKOFF_SECONDS = [4, 8, 16, 30];
+let cooldownUntil = 0;
+let lastSearchAt = 0;
+let waitListener = null;
+
+/** Laat de pagina weten dat we wachten (secondes), zodat ze dat kan tonen. */
+export function onRateLimitWait(fn) {
+  waitListener = fn;
+}
+
+async function pace(gap) {
+  for (;;) {
+    const now = Date.now();
+    const until = Math.max(cooldownUntil, lastSearchAt + gap);
+    if (until <= now) break;
+    if (cooldownUntil > now) waitListener?.(Math.ceil((cooldownUntil - now) / 1000));
+    await sleep(Math.min(1000, until - now));
+  }
+}
+
+async function spotifyFetch(token, path, init = {}, { search = false } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    await pace(search ? SEARCH_GAP_MS : 0);
+    if (search) lastSearchAt = Date.now();
     const res = await fetch(API + path, {
       ...init,
       headers: { Authorization: `Bearer ${token}`, ...(init.body ? { "Content-Type": "application/json" } : {}) },
     });
-    if (res.status === 429 && attempt < 3) {
-      await sleep(Math.min(20, Number(res.headers.get("Retry-After")) || 2 * (attempt + 1)) * 1000);
+    if (res.status === 429) {
+      // Retry-After is voor browsers vaak niet leesbaar (CORS); dan gebruiken we een oplopende pauze.
+      const header = Number(res.headers.get("Retry-After"));
+      const secs = Number.isFinite(header) && header > 0 ? header : BACKOFF_SECONDS[Math.min(attempt, BACKOFF_SECONDS.length - 1)];
+      if (attempt >= BACKOFF_SECONDS.length || secs > 60) {
+        cooldownUntil = Date.now() + Math.min(secs, 60) * 1000;
+        throw new SpotifyRateLimitError(`Spotify vraagt om even te wachten (te veel aanvragen${secs > 60 ? `, minstens ${Math.round(secs / 60)} min` : ""}).`);
+      }
+      cooldownUntil = Date.now() + secs * 1000;
       continue;
     }
     if (res.status === 401) {
@@ -134,7 +169,6 @@ async function spotifyFetch(token, path, init = {}) {
       throw new SpotifyAuthError("Je Spotify-verbinding is verlopen. Verbind opnieuw met Spotify.");
     }
     if (res.status === 403) throw new SpotifyAuthError(FORBIDDEN_MESSAGE);
-    if (res.status === 429) throw new Error("Spotify vraagt om even te wachten (te veel aanvragen). Probeer het zo opnieuw.");
     if (!res.ok) {
       let detail = "";
       try {
@@ -144,13 +178,12 @@ async function spotifyFetch(token, path, init = {}) {
     }
     return res.json();
   }
-  throw new Error("Spotify vraagt om even te wachten. Probeer het zo opnieuw.");
 }
 
 /** Zoekt nummers op Spotify (max. 5). Geeft een slank formaat terug. */
 export async function searchTracks(token, query) {
   if (!query) return [];
-  return mapSpotifyTracks(await spotifyFetch(token, `/search?${new URLSearchParams({ q: query, type: "track", limit: "5" })}`));
+  return mapSpotifyTracks(await spotifyFetch(token, `/search?${new URLSearchParams({ q: query, type: "track", limit: "5" })}`, {}, { search: true }));
 }
 
 /** Maakt de (private) playlist aan en voegt de nummers toe in blokken van 100. */

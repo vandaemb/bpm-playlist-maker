@@ -75,6 +75,38 @@ async function pool(items, size, fn) {
   return out;
 }
 
+// ---------- bewaarde Spotify-zoekresultaten ----------
+// Onthoudt per nummer wat Spotify teruggaf (ook "geen match"), zodat herhaalde of hervatte zoekopdrachten
+// geen Spotify-aanvragen verspillen.
+const MATCH_KEY = "bpm-spotify-matches-v1";
+const MATCH_MAX = 3000;
+const matchCache = (() => {
+  try {
+    const d = JSON.parse(localStorage.getItem(MATCH_KEY) || "{}");
+    return d && typeof d === "object" && !Array.isArray(d) ? d : {};
+  } catch {
+    return {};
+  }
+})();
+
+function rememberMatch(key, best) {
+  const keys = Object.keys(matchCache);
+  if (keys.length >= MATCH_MAX) for (const k of keys.slice(0, 500)) delete matchCache[k];
+  matchCache[key] = best
+    ? { uri: best.uri, name: best.name, artists: best.artists.slice(0, 3), album: best.album, image: best.image, durationMs: best.durationMs, year: best.year }
+    : 0;
+  try {
+    localStorage.setItem(MATCH_KEY, JSON.stringify(matchCache));
+  } catch {}
+}
+
+function recalledMatch(key) {
+  if (!Object.hasOwn(matchCache, key)) return undefined;
+  const m = matchCache[key];
+  if (!m) return null;
+  return L.SPOTIFY_TRACK_URI.test(String(m.uri)) && Array.isArray(m.artists) ? m : undefined;
+}
+
 // ---------- staat ----------
 const state = { results: [], scan: null, scanId: 0, playlist: loadDraft(), dragFrom: -1 };
 
@@ -238,24 +270,46 @@ async function continueScan(extra) {
 
       const token = S.getToken();
       if (!token) throw new S.SpotifyAuthError("Je Spotify-verbinding is verlopen. Verbind opnieuw met Spotify.");
-      const looked = await pool(batch, 2, async (c) => {
-        let tracks = await S.searchTracks(token, L.buildSearchQuery({ title: c.title, artist: c.artist }));
-        // Soms geeft de gestructureerde zoekopdracht niets terug: probeer dan gewone tekst.
-        if (!tracks.length) tracks = await S.searchTracks(token, L.buildSearchQuery({ q: `${c.artist} ${c.title}` }));
-        const best = L.pickBestMatch(tracks, c);
-        if (!best) {
-          scan.noMatch++;
-          if (!scan.sample) {
-            const f = tracks[0];
-            scan.sample = `bv. gezocht "${c.title} – ${c.artist}", Spotify gaf ${tracks.length} resultaten${f ? ` (eerste: "${f.name} – ${f.artists[0] || "?"}")` : ""}`.slice(0, 220);
+      let stopBatch = null; // na een blijvende 429 slaan we de rest van deze groep over
+      const looked = await pool(batch, 1, async (c) => {
+        if (stopBatch) throw stopBatch;
+        try {
+          return await lookup(c);
+        } catch (err) {
+          if (err instanceof S.SpotifyRateLimitError) stopBatch = err;
+          throw err;
+        }
+      });
+      async function lookup(c) {
+        const key = L.normKey(c.title, c.artist);
+        let best = recalledMatch(key);
+        if (best === undefined) {
+          let tracks = await S.searchTracks(token, L.buildSearchQuery({ title: c.title, artist: c.artist }));
+          // Soms geeft de gestructureerde zoekopdracht niets terug: probeer dan gewone tekst.
+          if (!tracks.length) tracks = await S.searchTracks(token, L.buildSearchQuery({ q: `${c.artist} ${c.title}` }));
+          best = L.pickBestMatch(tracks, c);
+          rememberMatch(key, best);
+          if (!best) {
+            scan.noMatch++;
+            if (!scan.sample) {
+              const f = tracks[0];
+              scan.sample = `bv. gezocht "${c.title} – ${c.artist}", Spotify gaf ${tracks.length} resultaten${f ? ` (eerste: "${f.name} – ${f.artists[0] || "?"}")` : ""}`.slice(0, 220);
+            }
           }
         }
         return best ? { c, best, spotifyId: L.spotifyIdFromUri(best.uri) } : null;
-      });
+      }
       if (scan.id !== state.scanId) return;
       // Fouten waar opnieuw proberen niets helpt (403/401) breken de zoekopdracht af met een duidelijke melding.
       const fatal = looked.find((r) => !r.ok && r.error instanceof S.SpotifyAuthError);
       if (fatal) throw fatal.error;
+      const limited = looked.find((r) => !r.ok && r.error instanceof S.SpotifyRateLimitError);
+      if (limited) {
+        // Reeds gevonden zoekresultaten staan in de bewaarde lijst; deze groep wordt bij hervatten snel herhaald.
+        scan.index -= batch.length;
+        scan.paused = limited.error.message;
+        break;
+      }
       const failed = looked.filter((r) => !r.ok);
       scan.searchErrors += failed.length;
       if (failed.length) scan.lastSearchError = failed[failed.length - 1].error.message;
@@ -276,7 +330,7 @@ async function continueScan(extra) {
       } catch (err) {
         // Niet doorgaan en deze groep overslaan: zet de zoekopdracht stil zodat "Meer zoeken" hem later hervat.
         scan.index -= batch.length;
-        scan.paused = err.message;
+        scan.paused = `de tempo-dienst blijft fouten geven (${err.message})`;
         break;
       }
       if (scan.id !== state.scanId) return;
@@ -322,7 +376,7 @@ async function continueScan(extra) {
 
   const exhausted = scan.index >= scan.candidates.length;
   if (scan.paused) {
-    return setStatus(`Gepauzeerd: de tempo-dienst (ReccoBeats) blijft fouten geven (${scan.paused}). ${scan.found.length} nummers gevonden tot nu toe. Wacht een paar minuten en klik op "Meer zoeken" om verder te gaan (reeds gecontroleerde nummers worden onthouden). · ${breakdown(scan)}`, "error");
+    return setStatus(`Gepauzeerd: ${scan.paused} ${scan.found.length} nummers gevonden tot nu toe. Wacht een paar minuten en klik op "Meer zoeken" om verder te gaan (reeds gecontroleerde nummers worden onthouden). · ${breakdown(scan)}`, "error");
   }
   if (scan.stopped) return setStatus(`Gestopt · ${scan.found.length} nummers gevonden · ${scan.index} van ${scan.candidates.length} gecontroleerd. Klik op "Meer zoeken" om verder te gaan. · ${breakdown(scan)}`);
   const parts = [`${scan.found.length} nummers gevonden`];
@@ -578,6 +632,9 @@ function init() {
   });
   $("clear-btn").addEventListener("click", () => {
     if (state.playlist.items.length && confirm("Alle nummers uit de lijst verwijderen?")) updateItems([]);
+  });
+  S.onRateLimitWait((secs) => {
+    if (state.scan?.running) setStatus(`Spotify vraagt om te vertragen, nieuwe poging over ${secs} s… · ${state.scan.found.length} gevonden · ${breakdown(state.scan)}`);
   });
   renderPlaylist();
   updateConnection();
