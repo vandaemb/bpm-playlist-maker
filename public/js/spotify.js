@@ -4,6 +4,7 @@
 // sessionStorage van deze browsertab en verdwijnt zodra de tab sluit of de gebruiker de verbinding verbreekt.
 
 import { mapSpotifyTracks } from "./logic.js";
+import { t } from "./i18n.js";
 
 const AUTH_URL = "https://accounts.spotify.com/authorize";
 const TOKEN_URL = "https://accounts.spotify.com/api/token";
@@ -92,10 +93,10 @@ export async function completeLogin(clientId, redirectUri) {
   cleanUrl();
 
   if (error) {
-    throw new Error(error === "access_denied" ? "Je hebt de toegang tot Spotify geweigerd." : `Spotify meldde een fout: ${error}`);
+    throw new Error(error === "access_denied" ? t("sp.denied") : t("sp.error", { error }));
   }
   if (!code || !verifier || !state || state !== savedState) {
-    throw new Error("De Spotify-aanmelding kon niet worden bevestigd. Probeer opnieuw.");
+    throw new Error(t("sp.confirm"));
   }
   const res = await fetch(TOKEN_URL, {
     method: "POST",
@@ -108,18 +109,14 @@ export async function completeLogin(clientId, redirectUri) {
       code_verifier: verifier,
     }),
   });
-  if (!res.ok) throw new Error("Spotify gaf geen toegang (token-aanvraag mislukt).");
+  if (!res.ok) throw new Error(t("sp.token"));
   const data = await res.json();
-  if (!data.access_token) throw new Error("Spotify gaf geen toegangstoken terug.");
+  if (!data.access_token) throw new Error(t("sp.noToken"));
   saveToken(data.access_token, data.expires_in);
   return data.access_token;
 }
 
 // ---- API-aanroepen met de token van de gebruiker ----
-const FORBIDDEN_MESSAGE =
-  "Spotify weigert toegang (403). Controleer of de eigenaar van de Spotify-app een actief Premium-abonnement heeft " +
-  "en of jouw account is toegevoegd bij 'User management' in het Spotify Developer Dashboard (maximaal 5 gebruikers).";
-
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Spotify geeft apps in development mode een erg lage limiet. We zoeken daarom rustig (vaste pauze tussen
@@ -159,22 +156,22 @@ async function spotifyFetch(token, path, init = {}, { search = false } = {}) {
       const secs = Number.isFinite(header) && header > 0 ? header : BACKOFF_SECONDS[Math.min(attempt, BACKOFF_SECONDS.length - 1)];
       if (attempt >= BACKOFF_SECONDS.length || secs > 60) {
         cooldownUntil = Date.now() + Math.min(secs, 60) * 1000;
-        throw new SpotifyRateLimitError(`Spotify vraagt om even te wachten (te veel aanvragen${secs > 60 ? `, minstens ${Math.round(secs / 60)} min` : ""}).`);
+        throw new SpotifyRateLimitError(secs > 60 ? t("sp.rateMin", { min: Math.round(secs / 60) }) : t("sp.rate"));
       }
       cooldownUntil = Date.now() + secs * 1000;
       continue;
     }
     if (res.status === 401) {
       clearToken();
-      throw new SpotifyAuthError("Je Spotify-verbinding is verlopen. Verbind opnieuw met Spotify.");
+      throw new SpotifyAuthError(t("sp.expired"));
     }
-    if (res.status === 403) throw new SpotifyAuthError(FORBIDDEN_MESSAGE);
+    if (res.status === 403) throw new SpotifyAuthError(t("sp.forbidden"));
     if (!res.ok) {
       let detail = "";
       try {
         detail = String((await res.json())?.error?.message ?? "").slice(0, 120);
       } catch {}
-      throw new Error(`Spotify-fout ${res.status}${detail ? `: ${detail}` : ""}`);
+      throw new Error(`${t("sp.fail", { status: res.status })}${detail ? `: ${detail}` : ""}`);
     }
     return res.json();
   }
@@ -190,7 +187,7 @@ export async function searchTracks(token, query) {
 export async function exportPlaylist(token, { name, uris }) {
   const cleanName = String(name || "Mijn BPM-playlist").slice(0, 100);
   const unique = [...new Set(uris)].filter((u) => TRACK_URI.test(u));
-  if (!unique.length) throw new Error("Er zijn geen geldige nummers om te exporteren.");
+  if (!unique.length) throw new Error(t("sp.noValid"));
 
   const playlist = await spotifyFetch(token, "/me/playlists", {
     method: "POST",

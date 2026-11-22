@@ -1,6 +1,7 @@
 import { CONFIG } from "./config.js";
 import * as L from "./logic.js";
 import * as S from "./spotify.js";
+import { t, apply, setLang, getLang, allValues } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
 const DRAFT_KEY = "bpm-playlist-draft-v1";
@@ -55,9 +56,9 @@ function loadDraft() {
         image: safeImage(i.image),
         durationMs: Number(i.durationMs) || 0,
       }));
-    return { name: String(d.name || "Mijn BPM-playlist").slice(0, 100), items };
+    return { name: String(d.name || "").slice(0, 100), items };
   } catch {
-    return { name: "Mijn BPM-playlist", items: [] };
+    return { name: "", items: [] };
   }
 }
 
@@ -67,7 +68,16 @@ function saveDraft() {
   } catch {}
 }
 
-function setStatus(text, kind = "") {
+// Meldingen worden als sleutel bewaard zodat ze meteen meewisselen als de taal verandert.
+let lastStatus = null;
+function setStatus(key, kind = "", params = {}) {
+  lastStatus = { key, kind, params };
+  const el = $("status");
+  el.textContent = key ? t(key, params) : "";
+  el.className = kind;
+}
+function setStatusRaw(text, kind = "") {
+  lastStatus = null;
   const el = $("status");
   el.textContent = text;
   el.className = kind;
@@ -112,7 +122,7 @@ const dataCache = new Map();
 function loadData(name) {
   if (!dataCache.has(name)) {
     const p = fetch(new URL(`/data/${name}.json`, location.origin)).then((res) => {
-      if (!res.ok) throw new Error(`De lijst kon niet geladen worden (${name}, HTTP ${res.status}).`);
+      if (!res.ok) throw new Error(t("err.load", { name, status: res.status }));
       return res.json();
     });
     p.catch(() => dataCache.delete(name));
@@ -125,34 +135,31 @@ async function onSearch(ev) {
   ev.preventDefault();
   const bpm = Number($("bpm").value);
   if (!Number.isFinite(bpm) || bpm < L.MIN_BPM || bpm > L.MAX_BPM) {
-    return setStatus(`Kies een BPM tussen ${L.MIN_BPM} en ${L.MAX_BPM}.`, "error");
+    return setStatus("st.bpmRange", "error", { min: L.MIN_BPM, max: L.MAX_BPM });
   }
   const tol = Number($("tol").value);
-  const genre = $("genre").value.trim().slice(0, 40);
+  const genre = $("genre").value.trim().slice(0, 60);
   const [from, to] = currentYears();
   $("search-btn").disabled = true;
-  setStatus("Zoeken…");
+  setStatus("st.searching");
   try {
     const [names, ...shards] = await Promise.all([loadData("genres"), ...L.dataBuckets(bpm, tol).map((b) => loadData(`bpm-${b}`))]);
-    const genreSet = L.genreIndexSet(names, genre);
+    const { include: genreSet, exclude: excludeSet } = L.genreFilter(names, genre);
     state.all = [];
     state.shown = 0;
     state.results = [];
     if (genreSet && genreSet.size === 0) {
-      setStatus(`Geen genre gevonden dat bij "${genre}" past. Probeer bv. pop, rock, hip hop, edm, jazz of laat het veld leeg.`, "error");
+      setStatus("st.noGenre", "error", { genre });
       return;
     }
-    state.all = L.filterRows(shards.flat(), { bpm, tol, from, to, genreSet });
+    state.all = L.filterRows(shards.flat(), { bpm, tol, from, to, genreSet, excludeSet });
     state.shown = Math.min(FIRST_SHOW, state.all.length);
     state.results = state.all.slice(0, state.shown);
-    setStatus(
-      state.all.length
-        ? `${state.all.length} nummers gevonden${state.shown < state.all.length ? `, de ${state.shown} populairste getoond` : ""}.`
-        : "0 nummers gevonden. Probeer een grotere marge, een breder jaarbereik of een ander genre.",
-      state.all.length ? "" : "error",
-    );
+    if (!state.all.length) setStatus("st.none", "error");
+    else if (state.shown < state.all.length) setStatus("st.foundShown", "", { n: state.all.length, shown: state.shown });
+    else setStatus("st.found", "", { n: state.all.length });
   } catch (err) {
-    setStatus(`Zoeken mislukt: ${err.message}`, "error");
+    setStatus("st.failed", "error", { msg: err.message });
   } finally {
     $("search-btn").disabled = false;
     renderResults();
@@ -162,7 +169,7 @@ async function onSearch(ev) {
 function showMore() {
   state.shown = Math.min(state.shown + MORE_SHOW, state.all.length);
   state.results = state.all.slice(0, state.shown);
-  setStatus(`${state.all.length} nummers gevonden, ${state.shown} getoond.`);
+  setStatus("st.shown", "", { n: state.all.length, shown: state.shown });
   renderResults();
 }
 
@@ -176,7 +183,7 @@ function renderResults() {
         cover(c.image),
         h("div", { class: "meta" }, h("strong", {}, c.title), h("span", {}, c.year ? `${c.artist} · ${c.year}` : c.artist)),
         h("div", { class: "bpm" }, `${c.bpm}`),
-        h("button", { type: "button", class: "ghost", disabled: inList, onclick: () => addCandidate(c) }, inList ? "Toegevoegd" : "Toevoegen"),
+        h("button", { type: "button", class: "ghost", disabled: inList, onclick: () => addCandidate(c) }, inList ? t("results.added") : t("results.add")),
       );
     }),
   );
@@ -228,9 +235,9 @@ function renderPlaylist() {
         h(
           "div",
           { class: "tools" },
-          h("button", { type: "button", title: "Omhoog", "aria-label": `${item.title} omhoog`, disabled: i === 0, onclick: () => updateItems(L.moveItem(items, i, i - 1)) }, "↑"),
-          h("button", { type: "button", title: "Omlaag", "aria-label": `${item.title} omlaag`, disabled: i === items.length - 1, onclick: () => updateItems(L.moveItem(items, i, i + 1)) }, "↓"),
-          h("button", { type: "button", title: "Verwijderen", "aria-label": `${item.title} verwijderen`, onclick: () => updateItems(items.filter((_, n) => n !== i)) }, "✕"),
+          h("button", { type: "button", title: t("pl.up"), "aria-label": t("pl.upAria", { title: item.title }), disabled: i === 0, onclick: () => updateItems(L.moveItem(items, i, i - 1)) }, "↑"),
+          h("button", { type: "button", title: t("pl.down"), "aria-label": t("pl.downAria", { title: item.title }), disabled: i === items.length - 1, onclick: () => updateItems(L.moveItem(items, i, i + 1)) }, "↓"),
+          h("button", { type: "button", title: t("pl.remove"), "aria-label": t("pl.removeAria", { title: item.title }), onclick: () => updateItems(items.filter((_, n) => n !== i)) }, "✕"),
         ),
       );
       row.addEventListener("dragstart", (e) => {
@@ -253,10 +260,10 @@ function renderPlaylist() {
     }),
   );
 
-  const parts = [`${items.length} nummers`];
+  const parts = [t("pl.count", { n: items.length })];
   const totalMs = items.reduce((sum, i) => sum + i.durationMs, 0);
   if (items.length && totalMs > 0) parts.push(L.formatDuration(totalMs));
-  $("pl-summary").textContent = items.length ? parts.join(" · ") : "Nog geen nummers. Voeg ze toe via de zoekresultaten of zoek er zelf een.";
+  $("pl-summary").textContent = items.length ? parts.join(" · ") : t("pl.empty");
   if (state.results.length) renderResults();
 }
 
@@ -266,69 +273,81 @@ async function onManualSearch(ev) {
   const q = $("manual-q").value.trim();
   const box = $("manual-results");
   if (!q) return;
-  box.replaceChildren(h("li", { class: "muted" }, "Zoeken…"));
+  box.replaceChildren(h("li", { class: "muted" }, t("manual.searching")));
   try {
     const token = S.getToken();
     if (!token) {
       updateConnection();
-      throw new Error("Verbind eerst met Spotify (knop bovenaan de zoekkaart).");
+      throw new Error(t("exp.connectFirst"));
     }
     const valid = await S.searchTracks(token, L.buildSearchQuery({ q }));
     box.replaceChildren(
       ...(valid.length
-        ? valid.map((t) =>
+        ? valid.map((tr) =>
             h(
               "li",
               { class: "row" },
-              cover(t.image),
-              h("div", { class: "meta" }, h("strong", {}, t.name), h("span", {}, `${t.artists.join(", ")} · ${t.album}`)),
+              cover(tr.image),
+              h("div", { class: "meta" }, h("strong", {}, tr.name), h("span", {}, `${tr.artists.join(", ")} · ${tr.album}`)),
               h(
                 "button",
                 {
                   type: "button",
                   class: "ghost",
                   onclick: () => {
-                    addToPlaylist({ title: t.name, artist: t.artists[0] || "", bpm: null, uri: t.uri, image: t.image, durationMs: t.durationMs });
+                    addToPlaylist({ title: tr.name, artist: tr.artists[0] || "", bpm: null, uri: tr.uri, image: tr.image, durationMs: tr.durationMs });
                     box.replaceChildren();
                     $("manual-q").value = "";
                   },
                 },
-                "Toevoegen",
+                t("results.add"),
               ),
             ),
           )
-        : [h("li", { class: "muted" }, "Niets gevonden.")]),
+        : [h("li", { class: "muted" }, t("manual.none"))]),
     );
   } catch (err) {
-    box.replaceChildren(h("li", { class: "msg error" }, `Zoeken mislukt: ${err.message}`));
+    box.replaceChildren(h("li", { class: "msg error" }, t("manual.failed", { msg: err.message })));
   }
 }
 
 // ---------- export ----------
-function showExport(kind, content, ...extra) {
+let lastExport = null;
+function showExport(kind, key, params = {}, link = "") {
+  lastExport = key ? { kind, key, params, link } : null;
+  renderExport();
+}
+function showExportRaw(kind, text) {
+  lastExport = { kind, raw: text };
+  renderExport();
+}
+function renderExport() {
   const box = $("export-result");
-  if (!content) return box.replaceChildren();
-  box.replaceChildren(h("div", { class: `msg ${kind}` }, content, ...extra));
+  if (!lastExport) return box.replaceChildren();
+  const { kind, key, params, raw, link } = lastExport;
+  box.replaceChildren(
+    h("div", { class: `msg ${kind}` }, raw ?? t(key, params), link ? [" ", h("a", { href: link, target: "_blank", rel: "noopener" }, t("exp.open"))] : null),
+  );
 }
 
 const redirectUri = () => location.origin + location.pathname;
 
 function connectToSpotify() {
   if (!CONFIG.SPOTIFY_CLIENT_ID || CONFIG.SPOTIFY_CLIENT_ID.startsWith("VUL_")) {
-    return setStatus("Het Spotify Client ID is nog niet ingesteld in public/js/config.js.", "error");
+    return setStatus("err.clientId", "error");
   }
-  S.startLogin(CONFIG.SPOTIFY_CLIENT_ID, redirectUri()).catch((err) => setStatus(err.message, "error"));
+  S.startLogin(CONFIG.SPOTIFY_CLIENT_ID, redirectUri()).catch((err) => setStatusRaw(err.message, "error"));
 }
 
 function disconnectSpotify() {
   S.clearToken();
   updateConnection();
-  setStatus("Je bent losgekoppeld van Spotify.");
+  setStatus("st.disconnected");
 }
 
 function updateConnection() {
   const connected = Boolean(S.getToken());
-  $("connect-state").textContent = connected ? "Verbonden met Spotify" : "Niet verbonden met Spotify";
+  $("connect-state").textContent = t(connected ? "conn.on" : "conn.off");
   $("connect-state").className = connected ? "connected" : "";
   $("connect-btn").hidden = connected;
   $("disconnect-btn").hidden = !connected;
@@ -336,24 +355,19 @@ function updateConnection() {
 
 async function onExport() {
   const items = state.playlist.items;
-  if (!items.length) return showExport("error", "Er zijn nog geen nummers in de lijst.");
+  if (!items.length) return showExport("error", "exp.empty");
   const token = S.getToken();
   if (!token) {
-    showExport("error", "Verbind eerst met Spotify met de knop 'Verbind met Spotify' bovenaan de zoekkaart. Daarna klik je opnieuw op Exporteer.");
-    return;
+    return showExport("error", "exp.connectFirst");
   }
   $("export-btn").disabled = true;
-  showExport("", "Playlist aanmaken op Spotify…");
+  showExport("", "exp.creating");
   try {
-    const res = await S.exportPlaylist(token, { name: state.playlist.name, uris: items.map((i) => i.uri) });
+    const res = await S.exportPlaylist(token, { name: state.playlist.name || t("pl.defaultName"), uris: items.map((i) => i.uri) });
     const safeLink = res.url.startsWith("https://open.spotify.com/") ? res.url : "";
-    showExport(
-      "ok",
-      `Klaar: ${res.count} nummers staan in je nieuwe (private) playlist. `,
-      safeLink ? h("a", { href: safeLink, target: "_blank", rel: "noopener" }, "Open in Spotify") : null,
-    );
+    showExport("ok", "exp.done", { n: res.count }, safeLink);
   } catch (err) {
-    showExport("error", err.message);
+    showExportRaw("error", err.message);
     updateConnection();
   } finally {
     $("export-btn").disabled = false;
@@ -365,18 +379,18 @@ async function finishLoginIfReturning() {
   if (!params.has("code") && !params.has("error")) return;
   try {
     await S.completeLogin(CONFIG.SPOTIFY_CLIENT_ID, redirectUri());
-    setStatus("Verbonden met Spotify. Je kunt nu nummers zoeken en je playlist exporteren.");
+    setStatus("st.connected");
   } catch (err) {
-    setStatus(err.message, "error");
+    setStatusRaw(err.message, "error");
   }
   updateConnection();
 }
 
 function downloadCsv() {
   const items = state.playlist.items;
-  if (!items.length) return showExport("error", "Er zijn nog geen nummers om te downloaden.");
-  const blob = new Blob(["﻿" + L.toCsv(items)], { type: "text/csv;charset=utf-8" });
-  const a = h("a", { href: URL.createObjectURL(blob), download: (state.playlist.name || "playlist").replace(/[^\w\- ]+/g, "").trim() + ".csv" });
+  if (!items.length) return showExport("error", "exp.emptyCsv");
+  const blob = new Blob(["﻿" + L.toCsv(items, [t("csv.title"), t("csv.artist"), "BPM", t("csv.link")])], { type: "text/csv;charset=utf-8" });
+  const a = h("a", { href: URL.createObjectURL(blob), download: (state.playlist.name || t("pl.defaultName")).replace(/[^\w\- ]+/g, "").trim() + ".csv" });
   document.body.append(a);
   a.click();
   a.remove();
@@ -384,8 +398,50 @@ function downloadCsv() {
 }
 
 // ---------- opstart ----------
+const DEFAULT_NAMES = allValues("pl.defaultName");
+
+// Alles wat de taal raakt opnieuw tekenen, zonder de pagina te herladen.
+function rerender() {
+  apply();
+  const nameEl = $("pl-name");
+  if (!state.playlist.name || DEFAULT_NAMES.includes(state.playlist.name)) {
+    state.playlist.name = t("pl.defaultName");
+    nameEl.value = state.playlist.name;
+  }
+  if (lastStatus) setStatus(lastStatus.key, lastStatus.kind, lastStatus.params);
+  renderExport();
+  renderPlaylist();
+  renderResults();
+  updateConnection();
+}
+
+function setupTempo() {
+  const bpm = $("bpm");
+  const mark = () => {
+    for (const c of document.querySelectorAll("#presets .chip")) c.setAttribute("aria-pressed", String(Number(c.dataset.bpm) === Number(bpm.value)));
+  };
+  const step = (d) => {
+    const v = Math.min(L.MAX_BPM, Math.max(L.MIN_BPM, (Number(bpm.value) || 120) + d));
+    bpm.value = String(v);
+    mark();
+  };
+  $("bpm-dec").addEventListener("click", () => step(-1));
+  $("bpm-inc").addEventListener("click", () => step(1));
+  bpm.addEventListener("input", mark);
+  for (const c of document.querySelectorAll("#presets .chip")) {
+    c.addEventListener("click", () => {
+      bpm.value = c.dataset.bpm;
+      mark();
+    });
+  }
+  mark();
+}
+
 function init() {
   setupYears();
+  setupTempo();
+  for (const b of document.querySelectorAll("[data-lang]")) b.addEventListener("click", () => setLang(b.dataset.lang) && rerender());
+  if (!state.playlist.name) state.playlist.name = t("pl.defaultName");
   $("pl-name").value = state.playlist.name;
   $("search-form").addEventListener("submit", onSearch);
   $("manual-form").addEventListener("submit", onManualSearch);
@@ -406,8 +462,9 @@ function init() {
     for (const c of state.results.slice(0, 25)) addCandidate(c);
   });
   $("clear-btn").addEventListener("click", () => {
-    if (state.playlist.items.length && confirm("Alle nummers uit de lijst verwijderen?")) updateItems([]);
+    if (state.playlist.items.length && confirm(t("confirm.clear"))) updateItems([]);
   });
+  apply();
   renderPlaylist();
   updateConnection();
   finishLoginIfReturning();

@@ -164,8 +164,8 @@ function csvCell(v) {
   return `"${s.replace(/"/g, '""')}"`;
 }
 
-export function toCsv(items) {
-  const rows = [["Titel", "Artiest", "BPM", "Spotify-link"]];
+export function toCsv(items, header = ["Titel", "Artiest", "BPM", "Spotify-link"]) {
+  const rows = [header];
   for (const t of items) {
     const id = spotifyIdFromUri(t.uri);
     rows.push([t.title, t.artist, t.bpm ?? "", id ? `https://open.spotify.com/track/${id}` : ""]);
@@ -189,32 +189,71 @@ export function dataBuckets(bpm, tol) {
 }
 
 /**
- * Welke genre-tags (indexen in genres.json) passen bij wat de gebruiker typte?
- * Elk woord moet in de tag voorkomen ("dance pop" past bij "dance pop" en "pop dance pop").
- * Leeg = geen filter (null). Geen enkele tag = lege set.
+ * Leest de genre-invoer met operators:
+ *   "pop, rock"   -> pop OF rock (komma, | of het woord "or")
+ *   "dance pop"   -> beide woorden moeten in dezelfde tag staan
+ *   "pop -rap"    -> pop, maar geen rap (ook "pop not rap")
+ * Geeft { terms: [[woord, ...], ...], not: [woord, ...] }.
  */
-export function genreIndexSet(names, query) {
-  const words = normText(query).split(" ").filter(Boolean);
-  if (!words.length) return null;
-  const set = new Set();
+export function parseGenreQuery(query) {
+  const terms = [];
+  const not = [];
+  const pieces = String(query ?? "").toLowerCase().split(/\s*(?:,|\||\bor\b)\s*/);
+  for (const piece of pieces) {
+    const words = [];
+    let negate = false;
+    for (const tok of piece.split(/\s+/).filter(Boolean)) {
+      if (tok === "not") { negate = true; continue; }
+      const neg = negate || (tok.length > 1 && tok.startsWith("-"));
+      const w = normText(tok.replace(/^-+/, ""));
+      negate = false;
+      if (!w) continue;
+      (neg ? not : words).push(w);
+    }
+    if (words.length) terms.push(words);
+  }
+  return { terms, not };
+}
+
+/**
+ * Welke genre-tags (indexen in genres.json) passen bij wat de gebruiker typte?
+ * Geeft { include: Set | null, exclude: Set } (include null = geen genrefilter).
+ * Elk woord van een term moet in de tag voorkomen; een uitgesloten woord moet als heel woord in de tag staan.
+ */
+export function genreFilter(names, query) {
+  const { terms, not } = parseGenreQuery(query);
+  const exclude = new Set();
+  let include = null;
+  if (terms.length) include = new Set();
+  if (!terms.length && !not.length) return { include: null, exclude };
   names.forEach((name, i) => {
     const n = normText(name);
-    if (words.every((w) => n.includes(w))) set.add(i);
+    if (include && terms.some((ws) => ws.every((w) => n.includes(w)))) include.add(i);
+    if (not.length) {
+      const parts = n.split(" ");
+      if (not.some((w) => parts.includes(w))) exclude.add(i);
+    }
   });
-  return set;
+  return { include, exclude };
+}
+
+/** Oudere vorm: alleen de include-set (null = geen filter). */
+export function genreIndexSet(names, query) {
+  return genreFilter(names, query).include;
 }
 
 /**
  * Filtert rijen [id, titel, artiest, bpm, jaar, populariteit, [genre-indexen]] op tempo, jaar en genre.
  * Sorteert op populariteit (hoogste eerst), daarna op afstand tot het gevraagde tempo.
  */
-export function filterRows(rows, { bpm, tol, from, to, genreSet }) {
+export function filterRows(rows, { bpm, tol, from, to, genreSet, excludeSet }) {
   const out = [];
   const seen = new Set();
   for (const r of rows) {
     const [id, title, artist, tempo, year, popularity, genres] = r;
     if (!SPOTIFY_ID.test(String(id)) || !tempoMatches(tempo, bpm, tol) || !yearMatches(year, from, to)) continue;
     if (genreSet && !genres.some((g) => genreSet.has(g))) continue;
+    if (excludeSet && excludeSet.size && genres.some((g) => excludeSet.has(g))) continue;
     const key = normKey(title, artist);
     if (seen.has(key)) continue;
     seen.add(key);

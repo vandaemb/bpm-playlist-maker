@@ -26,6 +26,7 @@ def titles(pg, sel):
 
 
 def search(pg, genre="pop", y_from="1950", y_to="2026", bpm="120", tol="2"):
+    pg.evaluate("document.getElementById('filters').open = true")
     pg.fill("#bpm", bpm)
     pg.select_option("#tol", tol)
     pg.fill("#genre", genre)
@@ -57,7 +58,7 @@ with sync_playwright() as p:
     b = p.chromium.launch(executable_path="/usr/bin/google-chrome", args=["--no-sandbox"])
 
     # A. zonder Spotify-verbinding kan je gewoon zoeken
-    pg = b.new_page()
+    pg = b.new_context(locale="nl-BE").new_page()
     watch(pg)
     pg.goto("http://127.0.0.1:8799/")
     assert pg.inner_text("#connect-state") == "Niet verbonden met Spotify"
@@ -73,7 +74,7 @@ with sync_playwright() as p:
     pg.close()
 
     # B. verbonden: volledige flow
-    pg = b.new_page()
+    pg = b.new_context(locale="nl-BE").new_page()
     watch(pg)
     pg.add_init_script(spotify_mock.TOKEN_SCRIPT)
     spotify_mock.install(pg)
@@ -81,6 +82,7 @@ with sync_playwright() as p:
     assert pg.inner_text("#connect-state") == "Verbonden met Spotify"
 
     # jaarschuiven: "van" duwt "tot" mee en omgekeerd
+    pg.evaluate("document.getElementById('filters').open = true")
     pg.fill("#year-from", "2000"); pg.fill("#year-to", "1990")
     assert pg.input_value("#year-from") == "1990" and pg.input_value("#year-to") == "1990"
     pg.fill("#year-from", "1950"); pg.fill("#year-to", pg.get_attribute("#year-to", "max"))
@@ -109,6 +111,28 @@ with sync_playwright() as p:
     assert "Geen genre gevonden" in pg.inner_text("#status") and rows(pg) == []
     search(pg, genre="")
     assert rows(pg), "leeg genre = alle genres"
+
+    # operators: "a, b" = of, "-x" sluit uit
+    both = len(search(pg, genre="pop, rock", tol="5") and rows(pg)) and int(pg.inner_text("#status").split()[0])
+    pop_n = (search(pg, genre="pop", tol="5"), int(pg.inner_text("#status").split()[0]))[1]
+    assert both >= pop_n, (both, pop_n)
+    no_rap = (search(pg, genre="hip hop -rap", tol="5"), pg.inner_text("#status"))[1]
+    assert ("0 nummers" in no_rap) or int(no_rap.split()[0]) >= 0
+    only_rap = (search(pg, genre="hip hop", tol="5"), int(pg.inner_text("#status").split()[0]))[1]
+    excl = search(pg, genre="hip hop -rap", tol="5") and int(pg.inner_text("#status").split()[0])
+    assert excl < only_rap, (excl, only_rap)
+
+    # taal wisselen: meteen, zonder pagina te herladen
+    pg.evaluate("window.__alive = 1")
+    pg.click('[data-lang="en"]')
+    assert pg.inner_text("h1") == "Run to the beat."
+    assert "tracks found" in pg.inner_text("#status"), pg.inner_text("#status")
+    assert pg.evaluate("window.__alive") == 1 and pg.evaluate("document.documentElement.lang") == "en"
+    pg.click('[data-lang="fr"]')
+    assert pg.inner_text("h1") == "Cours au rythme."
+    pg.click('[data-lang="nl"]')
+    assert pg.inner_text("h1") == "Loop op het ritme."
+    assert "nummers gevonden" in pg.inner_text("#status")
 
     # meer tonen
     search(pg, genre="", tol="5")

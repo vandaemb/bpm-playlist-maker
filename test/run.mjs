@@ -137,6 +137,33 @@ await test("filterRows: tempo, jaar, genre, ontdubbeling en volgorde (populairst
   assert.equal(L.filterRows(rows, { bpm: 120, tol: 2, from: 1950, to: 2026, genreSet: null }).length, 4);
 });
 
+await test("genre-operators: komma = of, min = uitsluiten, meerdere woorden = zelfde tag", () => {
+  assert.deepEqual(L.parseGenreQuery("pop, rock -rap"), { terms: [["pop"], ["rock"]], not: ["rap"] });
+  assert.deepEqual(L.parseGenreQuery("pop or rock | jazz"), { terms: [["pop"], ["rock"], ["jazz"]], not: [] });
+  assert.deepEqual(L.parseGenreQuery("dance pop not rap"), { terms: [["dance", "pop"]], not: ["rap"] });
+  const names = ["rock", "dance pop", "pop rap", "jazz", "trap", "indie pop"];
+  const f = L.genreFilter(names, "pop, jazz -rap");
+  assert.deepEqual([...f.include].sort(), [1, 2, 3, 5]);
+  assert.deepEqual([...f.exclude], [2]); // "trap" bevat rap niet als los woord
+  const onlyNot = L.genreFilter(names, "-rock");
+  assert.equal(onlyNot.include, null);
+  assert.deepEqual([...onlyNot.exclude], [0]);
+  const ID = (c) => c.repeat(22);
+  const rows = [[ID("a"), "A", "X", 120, 2000, 5, [1]], [ID("b"), "B", "Y", 120, 2000, 4, [2]], [ID("c"), "C", "Z", 120, 2000, 3, [3]]];
+  const out = L.filterRows(rows, { bpm: 120, tol: 1, from: 1950, to: 2026, genreSet: f.include, excludeSet: f.exclude });
+  assert.deepEqual(out.map((o) => o.title), ["A", "C"]);
+});
+
+await test("vertalingen: elke taal heeft dezelfde sleutels en dezelfde {parameters}", async () => {
+  const { dictionaries, LANGS } = await import("../public/js/i18n.js");
+  const ref = Object.keys(dictionaries.nl).sort();
+  const params = (s) => (s.match(/\{\w+\}/g) || []).sort().join();
+  for (const l of LANGS) {
+    assert.deepEqual(Object.keys(dictionaries[l]).sort(), ref, `sleutels ${l}`);
+    for (const k of ref) assert.equal(params(dictionaries[l][k]), params(dictionaries.nl[k]), `${l}:${k}`);
+  }
+});
+
 await test("PKCE challenge klopt met RFC 7636 testvector", async () => {
   assert.equal(
     await challengeFor("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),

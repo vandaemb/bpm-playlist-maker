@@ -12,7 +12,7 @@ errs, calls = [], []
 
 with sync_playwright() as p:
     b = p.chromium.launch(executable_path="/usr/bin/google-chrome", args=["--no-sandbox"])
-    pg = b.new_page()
+    pg = b.new_context(locale="nl-BE").new_page()
     pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.route("**/js/config.js", lambda r: r.fulfill(content_type="text/javascript", body='export const CONFIG={SPOTIFY_CLIENT_ID:"testclientid123"};'))
     pg.add_init_script("try { if(!localStorage.getItem('bpm-playlist-draft-v1')) localStorage.setItem('bpm-playlist-draft-v1', %s) } catch (e) {}" % json.dumps(json.dumps(DRAFT)))

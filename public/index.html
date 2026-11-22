@@ -3,126 +3,154 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BPM Playlist Maker</title>
-  <meta name="description" content="Maak een Spotify-playlist op basis van BPM, genre en uitgavejaar.">
-  <link rel="icon" href="data:,">
+  <meta name="color-scheme" content="light dark">
+  <title>BPM Playlist</title>
+  <meta name="description" content="BPM playlist generator for jogging and workouts. Choose a tempo, get a Spotify playlist.">
+  <link rel="icon" href="logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
-  <header class="top">
-    <h1>BPM Playlist Maker</h1>
-    <p>Kies een tempo, een genre en de periode waarin de nummers uitkwamen. Stel de playlist samen en exporteer ze met één klik naar Spotify.</p>
+  <header class="bar">
+    <a class="brand" href="./"><img src="logo.svg" alt="" width="28" height="28"><span data-i18n="app.name">BPM Playlist</span></a>
+    <nav class="langs" aria-label="Language">
+      <button type="button" data-lang="nl">NL</button>
+      <button type="button" data-lang="en">EN</button>
+      <button type="button" data-lang="fr">FR</button>
+      <button type="button" data-lang="de">DE</button>
+    </nav>
   </header>
 
   <main>
-    <section class="panel tutorial" aria-labelledby="h-help">
-      <details open>
-        <summary id="h-help">Hoe zet ik mijn playlist in Spotify?</summary>
-        <ol>
-          <li><strong>Zoek nummers.</strong> Vul je BPM in, kies eventueel een genre (bv. pop, rock, edm) en met de twee schuiven vanaf en tot welk jaar de nummers uitgebracht mogen zijn. Klik op <em>Zoek nummers</em>. De populairste nummers staan bovenaan.</li>
-          <li><strong>Bouw je lijst.</strong> Klik op <em>Toevoegen</em> bij de nummers die je wilt (of <em>Voeg de eerste 25 toe</em>). Pas daarna de volgorde aan door te slepen of te sorteren. Zelf een nummer toevoegen kan via <em>Zoek op Spotify</em>.</li>
-          <li><strong>Geef de playlist een naam</strong> bij <em>Jouw playlist</em>.</li>
-          <li><strong>Verbind met Spotify.</strong> Klik op <em>Verbind met Spotify</em>, log in bij Spotify en klik op <em>Akkoord</em>. Je wachtwoord blijft bij Spotify en deze site bewaart niets op een server. Dit is alleen nodig om te exporteren (of zelf op Spotify te zoeken).</li>
-          <li><strong>Klik op <em>Exporteer naar Spotify</em>.</strong> Je krijgt een knop <em>Open in Spotify</em>. De playlist staat dan in <em>Jouw bibliotheek</em> in Spotify en is privé tot je hem zelf deelt.</li>
-        </ol>
-        <p class="small muted"><strong>Foutmelding of geen toegang (403)?</strong> Deze site mag alleen exporteren voor personen die de beheerder bij Spotify heeft toegevoegd. Vraag de beheerder om je Spotify-e-mailadres toe te voegen.</p>
-        <p class="small muted"><strong>Geen toegang tot de export?</strong> Klik op <em>Download als CSV</em>. Open het bestand, klik op de Spotify-link van een nummer, kies in Spotify <em>•••</em> → <em>Toevoegen aan afspeellijst</em> en kies of maak je playlist.</p>
-      </details>
+    <section class="hero">
+      <h1 data-i18n="hero.title">Loop op het ritme.</h1>
+      <p data-i18n="hero.sub"></p>
     </section>
 
-    <section class="panel" aria-labelledby="h-find">
-      <h2 id="h-find">1. Nummers zoeken</h2>
-      <div id="connect-bar" class="connect">
-        <span id="connect-state">Niet verbonden met Spotify</span>
-        <span class="small muted">Alleen nodig om te exporteren.</span>
-        <button type="button" id="connect-btn" class="primary">Verbind met Spotify</button>
-        <button type="button" id="disconnect-btn" class="ghost" hidden>Verbinding verbreken</button>
-      </div>
-      <form id="search-form" class="grid" novalidate>
-        <label>BPM
-          <input id="bpm" type="number" min="40" max="220" value="120" inputmode="numeric" required>
-        </label>
-        <label>Marge
-          <select id="tol">
-            <option value="0">exact</option>
-            <option value="1">± 1</option>
-            <option value="2" selected>± 2</option>
-            <option value="3">± 3</option>
-            <option value="5">± 5</option>
-          </select>
-        </label>
-        <label>Genre <span class="opt">(optioneel)</span>
-          <input id="genre" type="text" list="genres" maxlength="40" placeholder="bv. dance, pop, hip hop (leeg = alles)" autocomplete="off">
-          <datalist id="genres">
-            <option value="pop"><option value="rock"><option value="dance"><option value="electronic">
-            <option value="house"><option value="techno"><option value="hip hop"><option value="r&b">
-            <option value="soul"><option value="funk"><option value="disco"><option value="jazz">
-            <option value="reggae"><option value="latin"><option value="indie"><option value="metal">
-            <option value="country"><option value="punk"><option value="folk"><option value="blues">
-          </datalist>
-        </label>
-        <div class="years">
-          <span class="lbl">Uitgebracht tussen <strong id="year-label"></strong></span>
-          <div class="ranges">
-            <label>Van <input id="year-from" type="range" step="1" min="1950" max="2026" value="1950"></label>
-            <label>Tot <input id="year-to" type="range" step="1" min="1950" max="2026" value="2026"></label>
-          </div>
+    <section class="card" aria-label="BPM">
+      <form id="search-form" novalidate>
+        <div class="tempo">
+          <button type="button" id="bpm-dec" class="round" data-i18n-aria="bpm.dec" aria-label="-">&minus;</button>
+          <label class="bpm-box"><input id="bpm" type="number" min="40" max="220" value="150" inputmode="numeric" required><span data-i18n="bpm.label">Tempo (BPM)</span></label>
+          <button type="button" id="bpm-inc" class="round" data-i18n-aria="bpm.inc" aria-label="+">+</button>
         </div>
-        <button type="submit" id="search-btn" class="primary">Zoek nummers</button>
+        <div class="chips" id="presets">
+          <button type="button" class="chip" data-bpm="110" data-i18n="preset.walk">Wandelen</button>
+          <button type="button" class="chip" data-bpm="150" data-i18n="preset.jog">Joggen</button>
+          <button type="button" class="chip" data-bpm="170" data-i18n="preset.run">Lopen</button>
+          <button type="button" class="chip" data-bpm="185" data-i18n="preset.sprint">Sprint</button>
+          <button type="button" class="chip" data-bpm="95" data-i18n="preset.cool">Cooldown</button>
+        </div>
+
+        <details class="filters" id="filters">
+          <summary data-i18n="filters.summary">Meer filters</summary>
+          <div class="grid">
+            <label><span data-i18n="tol.label">Marge</span>
+              <select id="tol">
+                <option value="0" data-i18n="tol.exact">exact</option>
+                <option value="1">&plusmn; 1</option>
+                <option value="2" selected>&plusmn; 2</option>
+                <option value="3">&plusmn; 3</option>
+                <option value="5">&plusmn; 5</option>
+              </select>
+            </label>
+            <label><span><span data-i18n="genre.label">Genre</span> <span class="opt">(<span data-i18n="genre.opt">optioneel</span>)</span></span>
+              <input id="genre" type="text" list="genres" maxlength="60" data-i18n-placeholder="genre.placeholder" placeholder="pop, rock -metal" autocomplete="off">
+              <datalist id="genres">
+                <option value="pop"><option value="rock"><option value="dance"><option value="electronic">
+                <option value="house"><option value="techno"><option value="hip hop"><option value="r&b">
+                <option value="soul"><option value="funk"><option value="disco"><option value="jazz">
+                <option value="reggae"><option value="latin"><option value="indie"><option value="metal">
+                <option value="country"><option value="punk"><option value="folk"><option value="blues">
+              </datalist>
+              <small class="muted" data-i18n="genre.hint"></small>
+            </label>
+          </div>
+          <div class="years">
+            <span class="lbl"><span data-i18n="years.label">Uitgebracht tussen</span> <strong id="year-label"></strong></span>
+            <div class="ranges">
+              <label><span data-i18n="years.from">Van</span> <input id="year-from" type="range" step="1" min="1950" max="2026" value="1950"></label>
+              <label><span data-i18n="years.to">Tot</span> <input id="year-to" type="range" step="1" min="1950" max="2026" value="2026"></label>
+            </div>
+          </div>
+        </details>
+
+        <button type="submit" id="search-btn" class="primary big" data-i18n="search">Zoek nummers</button>
+        <p class="note" data-i18n="note.dataset"></p>
       </form>
       <p id="status" role="status" aria-live="polite"></p>
       <div id="results-head" hidden>
-        <button type="button" id="add-top" class="ghost">Voeg de eerste 25 toe</button>
-        <button type="button" id="more-btn" class="ghost" hidden>Meer tonen</button>
+        <button type="button" id="add-top" class="ghost" data-i18n="results.add25">Voeg de eerste 25 toe</button>
+        <button type="button" id="more-btn" class="ghost" hidden data-i18n="results.more">Meer tonen</button>
       </div>
       <ul id="results" class="list"></ul>
     </section>
 
-    <section class="panel" aria-labelledby="h-list">
-      <h2 id="h-list">2. Jouw playlist</h2>
+    <section class="card" aria-labelledby="h-list">
+      <h2 id="h-list" data-i18n="pl.title">Jouw playlist</h2>
       <div class="grid">
-        <label>Naam
-          <input id="pl-name" type="text" maxlength="100" value="Mijn BPM-playlist">
+        <label><span data-i18n="pl.name">Naam</span>
+          <input id="pl-name" type="text" maxlength="100">
         </label>
-        <label>Sorteren
+        <label><span data-i18n="sort.label">Sorteren</span>
           <select id="sort">
-            <option value="">Kies een volgorde…</option>
-            <option value="bpm-asc">BPM laag → hoog</option>
-            <option value="bpm-desc">BPM hoog → laag</option>
-            <option value="title">Titel A → Z</option>
-            <option value="title-desc">Titel Z → A</option>
-            <option value="artist">Artiest A → Z</option>
-            <option value="shuffle">Willekeurig</option>
+            <option value="" data-i18n="sort.placeholder"></option>
+            <option value="bpm-asc" data-i18n="sort.bpmAsc"></option>
+            <option value="bpm-desc" data-i18n="sort.bpmDesc"></option>
+            <option value="title" data-i18n="sort.title"></option>
+            <option value="title-desc" data-i18n="sort.titleDesc"></option>
+            <option value="artist" data-i18n="sort.artist"></option>
+            <option value="shuffle" data-i18n="sort.shuffle"></option>
           </select>
         </label>
       </div>
       <p id="pl-summary" class="muted"></p>
       <ol id="pl-list" class="list"></ol>
-      <p class="muted small">Sleep een nummer om de volgorde te wijzigen, of gebruik de pijltjes.</p>
+      <p class="muted small" data-i18n="pl.dragHint"></p>
 
       <form id="manual-form" class="inline">
-        <label class="grow">Zelf een nummer toevoegen
-          <input id="manual-q" type="search" maxlength="100" placeholder="Titel en/of artiest" autocomplete="off">
+        <label class="grow"><span data-i18n="manual.label">Zelf een nummer toevoegen</span>
+          <input id="manual-q" type="search" maxlength="100" data-i18n-placeholder="manual.placeholder" placeholder="Titel en/of artiest" autocomplete="off">
         </label>
-        <button type="submit" class="ghost">Zoek op Spotify</button>
+        <button type="submit" class="ghost" data-i18n="manual.btn">Zoek op Spotify</button>
       </form>
       <ul id="manual-results" class="list"></ul>
 
+      <div id="connect-bar" class="connect">
+        <span id="connect-state" data-i18n="conn.off">Niet verbonden met Spotify</span>
+        <button type="button" id="connect-btn" class="ghost" data-i18n="conn.connect">Verbind met Spotify</button>
+        <button type="button" id="disconnect-btn" class="ghost" hidden data-i18n="conn.disconnect">Verbinding verbreken</button>
+      </div>
       <div class="actions">
-        <button type="button" id="export-btn" class="primary">Exporteer naar Spotify</button>
-        <button type="button" id="csv-btn" class="ghost">Download als CSV</button>
-        <button type="button" id="clear-btn" class="ghost danger">Lijst leegmaken</button>
+        <button type="button" id="export-btn" class="primary" data-i18n="export">Exporteer naar Spotify</button>
+        <button type="button" id="csv-btn" class="ghost" data-i18n="csv">Download als CSV</button>
+        <button type="button" id="clear-btn" class="ghost danger" data-i18n="clear">Lijst leegmaken</button>
       </div>
       <div id="export-result" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="faq" aria-labelledby="h-faq">
+      <h2 id="h-faq" data-i18n="faq.title">Veelgestelde vragen</h2>
+      <details><summary data-i18n="faq.q1"></summary><p data-i18n="faq.a1"></p></details>
+      <details id="faq-operators"><summary data-i18n="faq.q2"></summary>
+        <p data-i18n="faq.a2"></p>
+        <ul class="ops">
+          <li data-i18n="faq.op1"></li>
+          <li data-i18n="faq.op2"></li>
+          <li data-i18n="faq.op3"></li>
+          <li data-i18n="faq.op4"></li>
+        </ul>
+        <p data-i18n="faq.a2b"></p>
+      </details>
+      <details><summary data-i18n="faq.q3"></summary><p data-i18n="faq.a3"></p></details>
+      <details><summary data-i18n="faq.q4"></summary><p data-i18n="faq.a4"></p></details>
+      <details><summary data-i18n="faq.q5"></summary><p data-i18n="faq.a5"></p></details>
+      <details><summary data-i18n="faq.q6"></summary><p data-i18n="faq.a6"></p></details>
     </section>
   </main>
 
   <footer>
-    <p>
-      Nummerlijst met BPM, genre en jaar: <a href="https://zenodo.org/records/11453410" target="_blank" rel="noopener">Almost a million Spotify tracks</a> (Zenodo, licentie CC BY 4.0), bewerkt en ingekort voor deze site. Tempo's zijn schattingen.
-      Nummers en export via Spotify. Deze site heeft geen accounts en slaat niets van je op op een server.
-    </p>
+    <p><span data-i18n="footer.pre"></span> <a href="https://zenodo.org/records/11453410" target="_blank" rel="noopener">Almost a million Spotify tracks</a> <span data-i18n="footer.post"></span></p>
   </footer>
 </body>
 </html>
